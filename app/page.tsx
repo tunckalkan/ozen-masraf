@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import * as XLSX from "xlsx"
 import { supabase } from "../lib/supabaseClient"
 
 type Department = {
@@ -198,7 +199,7 @@ export default function Home() {
         expense_files(file_url, file_name)
       `)
       .order("id", { ascending: false })
-      .limit(100)
+      .limit(200)
 
     if (isPersonel) {
       query = query.eq("user_id", session.user.id)
@@ -412,55 +413,62 @@ export default function Home() {
     })
   }, [expenses, searchText, statusFilter, dateFrom, dateTo])
 
-  function exportCsv() {
+  function exportExcel() {
     if (filteredExpenses.length === 0) {
       setMessage("İndirilecek kayıt bulunamadı.")
       return
     }
 
-    const rows = [
-      [
-        "Masraf No",
-        "Tarih",
-        "Departman",
-        "Kategori",
-        "Tedarikçi",
-        "Açıklama",
-        "Tutar",
-        "Para Birimi",
-        "Ödeme Tipi",
-        "Durum",
-      ],
-      ...filteredExpenses.map((expense) => [
-        expense.expense_no || "",
-        expense.expense_date || "",
-        expense.departments?.[0]?.name || "",
-        expense.categories?.[0]?.name || "",
-        expense.vendor_name || "",
-        expense.description || "",
-        String(expense.amount ?? ""),
-        expense.currency_code || "",
-        expense.payment_type || "",
-        expense.status || "",
-      ]),
-    ]
+    const rows = filteredExpenses.map((e) => ({
+      MasrafNo: e.expense_no,
+      Tarih: e.expense_date,
+      Departman: e.departments?.[0]?.name || "",
+      Kategori: e.categories?.[0]?.name || "",
+      Tedarikçi: e.vendor_name || "",
+      Açıklama: e.description || "",
+      Tutar: e.amount,
+      ParaBirimi: e.currency_code,
+      ÖdemeTipi: e.payment_type,
+      Durum: e.status,
+    }))
 
-    const csvContent = rows
-      .map((row) =>
-        row
-          .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
-          .join(",")
-      )
-      .join("\n")
+    const worksheet = XLSX.utils.json_to_sheet(rows)
+    const workbook = XLSX.utils.book_new()
 
-    const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement("a")
-    link.href = url
-    link.download = "masraf-raporu.csv"
-    link.click()
-    URL.revokeObjectURL(url)
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Masraflar")
+    XLSX.writeFile(workbook, "masraf-raporu.xlsx")
   }
+
+  const dashboard = useMemo(() => {
+    const totalCount = expenses.length
+    const pendingCount = expenses.filter(
+      (e) => e.status === "submitted" || e.status === "under_review"
+    ).length
+    const approvedCount = expenses.filter((e) => e.status === "approved").length
+    const rejectedCount = expenses.filter((e) => e.status === "rejected").length
+
+    const totalTry = expenses
+      .filter((e) => e.currency_code === "TRY")
+      .reduce((sum, e) => sum + Number(e.amount || 0), 0)
+
+    const totalUsd = expenses
+      .filter((e) => e.currency_code === "USD")
+      .reduce((sum, e) => sum + Number(e.amount || 0), 0)
+
+    const totalEur = expenses
+      .filter((e) => e.currency_code === "EUR")
+      .reduce((sum, e) => sum + Number(e.amount || 0), 0)
+
+    return {
+      totalCount,
+      pendingCount,
+      approvedCount,
+      rejectedCount,
+      totalTry,
+      totalUsd,
+      totalEur,
+    }
+  }, [expenses])
 
   function roleName(roleId?: number | null) {
     if (roleId === 1) return "Personel"
@@ -512,7 +520,7 @@ export default function Home() {
 
   return (
     <div style={pageStyle}>
-      <div style={{ maxWidth: "1200px", margin: "0 auto" }}>
+      <div style={{ maxWidth: "1300px", margin: "0 auto" }}>
         <div
           style={{
             display: "flex",
@@ -523,7 +531,9 @@ export default function Home() {
           }}
         >
           <div>
-            <h1 style={{ marginTop: 0, marginBottom: "8px" }}>Özen İplik Masraf Sistemi</h1>
+            <h1 style={{ marginTop: 0, marginBottom: "8px", fontSize: "clamp(24px, 4vw, 34px)" }}>
+              Özen İplik Masraf Sistemi
+            </h1>
             <p style={{ color: "#475569", margin: 0 }}>
               Hoş geldiniz{profile?.full_name ? `, ${profile.full_name}` : ""}.
             </p>
@@ -543,15 +553,46 @@ export default function Home() {
           </div>
         )}
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1.2fr",
-            gap: "24px",
-            alignItems: "start",
-            marginTop: "24px",
-          }}
-        >
+        {(isMuhasebe || isYonetici) && (
+          <div style={dashboardGridStyle}>
+            <div style={dashboardCardStyle}>
+              <div style={dashboardTitleStyle}>Toplam Kayıt</div>
+              <div style={dashboardValueStyle}>{dashboard.totalCount}</div>
+            </div>
+
+            <div style={dashboardCardStyle}>
+              <div style={dashboardTitleStyle}>Bekleyen</div>
+              <div style={dashboardValueStyle}>{dashboard.pendingCount}</div>
+            </div>
+
+            <div style={dashboardCardStyle}>
+              <div style={dashboardTitleStyle}>Onaylanan</div>
+              <div style={dashboardValueStyle}>{dashboard.approvedCount}</div>
+            </div>
+
+            <div style={dashboardCardStyle}>
+              <div style={dashboardTitleStyle}>Reddedilen</div>
+              <div style={dashboardValueStyle}>{dashboard.rejectedCount}</div>
+            </div>
+
+            <div style={dashboardCardStyle}>
+              <div style={dashboardTitleStyle}>TRY Toplam</div>
+              <div style={dashboardValueStyle}>{dashboard.totalTry.toLocaleString("tr-TR")}</div>
+            </div>
+
+            <div style={dashboardCardStyle}>
+              <div style={dashboardTitleStyle}>USD Toplam</div>
+              <div style={dashboardValueStyle}>{dashboard.totalUsd.toLocaleString("tr-TR")}</div>
+            </div>
+
+            <div style={dashboardCardStyle}>
+              <div style={dashboardTitleStyle}>EUR Toplam</div>
+              <div style={dashboardValueStyle}>{dashboard.totalEur.toLocaleString("tr-TR")}</div>
+            </div>
+          </div>
+        )}
+
+        <div style={mainGridStyle}>
           <div style={cardStyle}>
             <h2>Yeni Masraf Ekle</h2>
 
@@ -615,18 +656,11 @@ export default function Home() {
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Masraf açıklaması"
                   rows={4}
-                  style={{ ...inputStyle, resize: "vertical" }}
+                  style={{ ...inputStyle, resize: "vertical", minHeight: "110px" }}
                 />
               </div>
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: "16px",
-                  marginBottom: "16px",
-                }}
-              >
+              <div style={twoColGridStyle}>
                 <div>
                   <label style={labelStyle}>Tutar</label>
                   <input
@@ -703,19 +737,12 @@ export default function Home() {
                   : "Tüm Masraf Kayıtları"}
               </h2>
 
-              <button onClick={exportCsv} style={secondaryButtonStyle}>
-                CSV İndir
+              <button onClick={exportExcel} style={secondaryButtonStyle}>
+                Excel İndir
               </button>
             </div>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "12px",
-                marginBottom: "16px",
-              }}
-            >
+            <div style={filterGridStyle}>
               <input
                 type="text"
                 placeholder="Masraf no, açıklama, firma ara"
@@ -766,9 +793,9 @@ export default function Home() {
                       background: "#f8fafc",
                     }}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
-                      <strong>{expense.expense_no}</strong>
-                      <span>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+                      <strong style={{ fontSize: "24px" }}>{expense.expense_no}</strong>
+                      <span style={{ fontWeight: 700 }}>
                         {expense.amount} {expense.currency_code}
                       </span>
                     </div>
@@ -777,7 +804,7 @@ export default function Home() {
                       {expense.description}
                     </div>
 
-                    <div style={{ marginTop: "8px", fontSize: "14px", color: "#64748b" }}>
+                    <div style={{ marginTop: "8px", fontSize: "14px", color: "#64748b", lineHeight: 1.6 }}>
                       <div>Tarih: {expense.expense_date}</div>
                       <div>Departman: {expense.departments?.[0]?.name || "-"}</div>
                       <div>Kategori: {expense.categories?.[0]?.name || "-"}</div>
@@ -804,7 +831,7 @@ export default function Home() {
                     )}
 
                     {canApproveReject && (
-                      <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
+                      <div style={{ display: "flex", gap: "10px", marginTop: "12px", flexWrap: "wrap" }}>
                         <button
                           type="button"
                           disabled={actionLoadingId === expense.id}
@@ -842,15 +869,45 @@ export default function Home() {
 const pageStyle: React.CSSProperties = {
   minHeight: "100vh",
   background: "#f8fafc",
-  padding: "32px",
+  padding: "16px",
   fontFamily: "Arial, sans-serif",
+}
+
+const mainGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+  gap: "24px",
+  alignItems: "start",
+}
+
+const dashboardGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: "16px",
+  marginTop: "24px",
+  marginBottom: "24px",
+}
+
+const filterGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: "12px",
+  marginBottom: "16px",
+}
+
+const twoColGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+  gap: "16px",
+  marginBottom: "16px",
 }
 
 const cardStyle: React.CSSProperties = {
   background: "#ffffff",
   borderRadius: "16px",
-  padding: "24px",
+  padding: "20px",
   boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+  overflow: "hidden",
 }
 
 const loginCardStyle: React.CSSProperties = {
@@ -860,6 +917,25 @@ const loginCardStyle: React.CSSProperties = {
   borderRadius: "16px",
   padding: "24px",
   boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+}
+
+const dashboardCardStyle: React.CSSProperties = {
+  background: "#ffffff",
+  borderRadius: "16px",
+  padding: "18px",
+  boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+}
+
+const dashboardTitleStyle: React.CSSProperties = {
+  fontSize: "14px",
+  color: "#64748b",
+  marginBottom: "8px",
+}
+
+const dashboardValueStyle: React.CSSProperties = {
+  fontSize: "28px",
+  fontWeight: 700,
+  color: "#0f172a",
 }
 
 const labelStyle: React.CSSProperties = {
@@ -875,6 +951,7 @@ const inputStyle: React.CSSProperties = {
   border: "1px solid #cbd5e1",
   boxSizing: "border-box",
   fontSize: "14px",
+  minWidth: 0,
 }
 
 const primaryButtonStyle: React.CSSProperties = {
