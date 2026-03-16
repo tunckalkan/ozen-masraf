@@ -46,436 +46,1041 @@ type Profile = {
 }
 
 export default function Home() {
+  const [session, setSession] = useState<any>(null)
+  const [profile, setProfile] = useState<Profile | null>(null)
 
-  const [session,setSession] = useState<any>(null)
-  const [profile,setProfile] = useState<Profile|null>(null)
+  const [email, setEmail] = useState("test@ozeniplik.com")
+  const [password, setPassword] = useState("12345678Aa!")
 
-  const [email,setEmail] = useState("test@ozeniplik.com")
-  const [password,setPassword] = useState("12345678Aa!")
+  const [departments, setDepartments] = useState<Department[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [expenses, setExpenses] = useState<Expense[]>([])
 
-  const [departments,setDepartments] = useState<Department[]>([])
-  const [categories,setCategories] = useState<Category[]>([])
-  const [expenses,setExpenses] = useState<Expense[]>([])
+  const [departmentId, setDepartmentId] = useState("")
+  const [categoryId, setCategoryId] = useState("")
+  const [expenseDate, setExpenseDate] = useState("")
+  const [vendorName, setVendorName] = useState("")
+  const [description, setDescription] = useState("")
+  const [amount, setAmount] = useState("")
+  const [currencyCode, setCurrencyCode] = useState("TRY")
+  const [paymentType, setPaymentType] = useState("personal_card")
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
-  const [departmentId,setDepartmentId] = useState("")
-  const [categoryId,setCategoryId] = useState("")
-  const [expenseDate,setExpenseDate] = useState("")
-  const [vendorName,setVendorName] = useState("")
-  const [description,setDescription] = useState("")
-  const [amount,setAmount] = useState("")
-  const [currencyCode,setCurrencyCode] = useState("TRY")
-  const [paymentType,setPaymentType] = useState("personal_card")
+  const [searchText, setSearchText] = useState("")
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
 
-  const [selectedFile,setSelectedFile] = useState<File|null>(null)
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState("")
+  const [actionLoadingId, setActionLoadingId] = useState<number | null>(null)
 
-  const [loading,setLoading] = useState(false)
-  const [message,setMessage] = useState("")
-
+  const isPersonel = profile?.role_id === 1
   const isMuhasebe = profile?.role_id === 2
+  const isYonetici = profile?.role_id === 3
 
-  useEffect(()=>{
+  const canApproveReject = isMuhasebe
+
+  useEffect(() => {
     checkSession()
 
-    const { data:{ subscription } } =
-    supabase.auth.onAuthStateChange(async (_event,currentSession)=>{
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, currentSession) => {
       setSession(currentSession)
 
-      if(currentSession?.user?.id){
+      if (currentSession?.user?.id) {
         await fetchProfile(currentSession.user.id)
+      } else {
+        setProfile(null)
+        setExpenses([])
       }
     })
 
-    return ()=>subscription.unsubscribe()
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [])
 
-  },[])
-
-  useEffect(()=>{
-    if(session?.user?.id){
+  useEffect(() => {
+    if (session?.user?.id) {
       fetchInitialData()
+    }
+  }, [session])
+
+  useEffect(() => {
+    if (session?.user?.id && profile) {
       fetchExpenses()
     }
-  },[session])
+  }, [session, profile])
 
-  async function checkSession(){
-
-    const { data:{ session } } =
-    await supabase.auth.getSession()
-
-    setSession(session)
-
-    if(session?.user?.id){
-      await fetchProfile(session.user.id)
+  useEffect(() => {
+    if (isMuhasebe) {
+      setStatusFilter("pending")
+    } else {
+      setStatusFilter("all")
     }
+  }, [isMuhasebe])
 
+  async function checkSession() {
+    const {
+      data: { session: currentSession },
+    } = await supabase.auth.getSession()
+
+    setSession(currentSession)
+
+    if (currentSession?.user?.id) {
+      await fetchProfile(currentSession.user.id)
+    }
   }
 
-  async function fetchProfile(userId:string){
+  async function fetchProfile(userId: string) {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, full_name, email, department_id, role_id")
+      .eq("id", userId)
+      .single()
 
-    const { data } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id",userId)
-    .single()
+    if (error) {
+      console.error("Profil çekme hatası:", error)
+      return
+    }
 
     setProfile(data)
 
-    if(data?.department_id){
+    if (data?.department_id) {
       setDepartmentId(String(data.department_id))
     }
-
   }
 
-  async function fetchInitialData(){
+  async function fetchInitialData() {
+    const { data: departmentData } = await supabase
+      .from("departments")
+      .select("id, name")
+      .eq("is_active", true)
+      .order("id", { ascending: true })
 
-    const { data:dep } =
-    await supabase.from("departments").select("*")
+    const { data: categoryData } = await supabase
+      .from("categories")
+      .select("id, name")
+      .eq("is_active", true)
+      .order("id", { ascending: true })
 
-    const { data:cat } =
-    await supabase.from("categories").select("*")
+    setDepartments(departmentData || [])
+    setCategories(categoryData || [])
 
-    setDepartments(dep || [])
-    setCategories(cat || [])
+    if (!departmentId && departmentData && departmentData.length > 0) {
+      setDepartmentId(String(departmentData[0].id))
+    }
 
+    if (categoryData && categoryData.length > 0) {
+      setCategoryId(String(categoryData[0].id))
+    }
   }
 
-  async function fetchExpenses(){
+  async function fetchExpenses() {
+    if (!session?.user?.id || !profile) return
 
-    const { data } =
-    await supabase
-    .from("expenses")
-    .select(`
-      *,
-      departments(name),
-      categories(name),
-      expense_files(file_url,file_name)
-    `)
-    .order("id",{ascending:false})
+    let query = supabase
+      .from("expenses")
+      .select(`
+        id,
+        expense_no,
+        expense_date,
+        vendor_name,
+        description,
+        amount,
+        currency_code,
+        payment_type,
+        status,
+        created_at,
+        user_id,
+        departments(name),
+        categories(name),
+        expense_files(file_url, file_name)
+      `)
+      .order("id", { ascending: false })
+      .limit(200)
+
+    if (isPersonel) {
+      query = query.eq("user_id", session.user.id)
+    }
+
+    if (isMuhasebe) {
+      query = query.in("status", ["submitted", "under_review"])
+    }
+
+    const { data, error } = await query
+
+    if (error) {
+      console.error("Masraf listeleme hatası:", error)
+      return
+    }
 
     setExpenses((data as unknown as Expense[]) || [])
-
   }
 
-  async function handleLogin(e:React.FormEvent){
-
+  async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
-
+    setMessage("")
     setLoading(true)
 
-    const { error } =
-    await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
-      password
+      password,
     })
 
     setLoading(false)
 
-    if(error){
-      setMessage(error.message)
-    }else{
-      setMessage("Giriş başarılı.")
+    if (error) {
+      setMessage("Giriş hatası: " + error.message)
+      return
     }
 
+    setMessage("Giriş başarılı.")
   }
 
-  async function handleLogout(){
-    await supabase.auth.signOut()
+  async function handleLogout() {
+    const { error } = await supabase.auth.signOut()
+    if (error) {
+      setMessage("Çıkış yapılamadı: " + error.message)
+      return
+    }
+    setMessage("Çıkış yapıldı.")
   }
 
-  async function handleSubmit(e:React.FormEvent){
-
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    setMessage("")
 
-    const { data } =
-    await supabase
-    .from("expenses")
-    .insert([{
-      user_id:session.user.id,
-      department_id:Number(departmentId),
-      category_id:Number(categoryId),
-      expense_date:expenseDate,
-      vendor_name:vendorName,
-      description,
-      amount:Number(amount),
-      currency_code:currencyCode,
-      payment_type:paymentType,
-      status:"submitted"
-    }])
-    .select()
-    .single()
-
-    if(selectedFile && data){
-
-      const filePath =
-      `expenses/${data.id}/${Date.now()}_${selectedFile.name}`
-
-      await supabase.storage
-      .from("expense-files")
-      .upload(filePath,selectedFile)
-
+    if (!session?.user?.id || !profile) {
+      setMessage("Önce giriş yapmalısınız.")
+      return
     }
 
-    setMessage("Masraf kaydedildi.")
+    if (!departmentId || !categoryId || !expenseDate || !description || !amount) {
+      setMessage("Lütfen zorunlu alanları doldurun.")
+      return
+    }
+
+    setLoading(true)
+
+    const { data: insertedExpense, error: expenseError } = await supabase
+      .from("expenses")
+      .insert([
+        {
+          user_id: session.user.id,
+          department_id: Number(departmentId),
+          category_id: Number(categoryId),
+          expense_date: expenseDate,
+          vendor_name: vendorName || null,
+          description,
+          amount: Number(amount),
+          currency_code: currencyCode,
+          payment_type: paymentType,
+          status: "submitted",
+        },
+      ])
+      .select()
+      .single()
+
+    if (expenseError || !insertedExpense) {
+      setLoading(false)
+      setMessage("Masraf kaydı sırasında hata oluştu.")
+      return
+    }
+
+    if (selectedFile) {
+      const safeFileName = selectedFile.name.replace(/\s+/g, "_")
+      const filePath = `expenses/${insertedExpense.id}/${Date.now()}_${safeFileName}`
+
+      const { error: uploadError } = await supabase.storage
+        .from("expense-files")
+        .upload(filePath, selectedFile, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: selectedFile.type,
+        })
+
+      if (!uploadError) {
+        const { data: publicUrlData } = supabase.storage
+          .from("expense-files")
+          .getPublicUrl(filePath)
+
+        await supabase.from("expense_files").insert([
+          {
+            expense_id: insertedExpense.id,
+            file_name: selectedFile.name,
+            file_path: filePath,
+            file_url: publicUrlData.publicUrl,
+            uploaded_by: session.user.id,
+          },
+        ])
+      }
+    }
+
+    await supabase.from("expense_status_logs").insert([
+      {
+        expense_id: insertedExpense.id,
+        action_by: session.user.id,
+        old_status: null,
+        new_status: "submitted",
+        note: "Masraf kaydı oluşturuldu",
+      },
+    ])
+
+    setLoading(false)
+    setMessage("Masraf kaydı başarıyla eklendi.")
+
+    setVendorName("")
+    setDescription("")
+    setAmount("")
+    setCurrencyCode("TRY")
+    setPaymentType("personal_card")
+    setExpenseDate("")
+    setSelectedFile(null)
+
+    const fileInput = document.getElementById("expense-file") as HTMLInputElement | null
+    if (fileInput) fileInput.value = ""
 
     fetchExpenses()
-
   }
 
-  function exportExcel(){
+  async function updateExpenseStatus(
+    expenseId: number,
+    oldStatus: string,
+    newStatus: "approved" | "rejected"
+  ) {
+    if (!session?.user?.id || !canApproveReject) return
 
-    const rows =
-    expenses.map(e=>({
-      MasrafNo:e.expense_no,
-      Tarih:e.expense_date,
-      Departman:e.departments?.[0]?.name || "",
-      Kategori:e.categories?.[0]?.name || "",
-      Tutar:e.amount,
-      ParaBirimi:e.currency_code,
-      Açıklama:e.description
+    setMessage("")
+    setActionLoadingId(expenseId)
+
+    const updatePayload: any = {
+      status: newStatus,
+      approved_by: session.user.id,
+      approved_at: newStatus === "approved" ? new Date().toISOString() : null,
+    }
+
+    if (newStatus === "rejected") {
+      updatePayload.rejection_reason = "Muhasebe tarafından reddedildi"
+    }
+
+    const { error: updateError } = await supabase
+      .from("expenses")
+      .update(updatePayload)
+      .eq("id", expenseId)
+
+    if (updateError) {
+      setMessage("Durum güncellenemedi: " + updateError.message)
+      setActionLoadingId(null)
+      return
+    }
+
+    await supabase.from("expense_status_logs").insert([
+      {
+        expense_id: expenseId,
+        action_by: session.user.id,
+        old_status: oldStatus,
+        new_status: newStatus,
+        note: newStatus === "approved" ? "Kayıt onaylandı" : "Kayıt reddedildi",
+      },
+    ])
+
+    setMessage(newStatus === "approved" ? "Masraf onaylandı." : "Masraf reddedildi.")
+    setActionLoadingId(null)
+    fetchExpenses()
+  }
+
+  const filteredExpenses = useMemo(() => {
+    return expenses.filter((expense) => {
+      const search = searchText.trim().toLowerCase()
+
+      const matchesSearch =
+        !search ||
+        expense.expense_no?.toLowerCase().includes(search) ||
+        expense.description?.toLowerCase().includes(search) ||
+        expense.vendor_name?.toLowerCase().includes(search) ||
+        expense.departments?.[0]?.name?.toLowerCase().includes(search) ||
+        expense.categories?.[0]?.name?.toLowerCase().includes(search)
+
+      const matchesStatus =
+        statusFilter === "all"
+          ? true
+          : statusFilter === "pending"
+          ? expense.status === "submitted" || expense.status === "under_review"
+          : expense.status === statusFilter
+
+      const matchesDateFrom = !dateFrom || expense.expense_date >= dateFrom
+      const matchesDateTo = !dateTo || expense.expense_date <= dateTo
+
+      return matchesSearch && matchesStatus && matchesDateFrom && matchesDateTo
+    })
+  }, [expenses, searchText, statusFilter, dateFrom, dateTo])
+
+  function exportExcel() {
+    if (filteredExpenses.length === 0) {
+      setMessage("İndirilecek kayıt bulunamadı.")
+      return
+    }
+
+    const rows = filteredExpenses.map((e) => ({
+      MasrafNo: e.expense_no,
+      Tarih: e.expense_date,
+      Departman: e.departments?.[0]?.name || "",
+      Kategori: e.categories?.[0]?.name || "",
+      Tedarikçi: e.vendor_name || "",
+      Açıklama: e.description || "",
+      Tutar: e.amount,
+      ParaBirimi: e.currency_code,
+      ÖdemeTipi: e.payment_type,
+      Durum: e.status,
     }))
 
-    const ws = XLSX.utils.json_to_sheet(rows)
-    const wb = XLSX.utils.book_new()
-
-    XLSX.utils.book_append_sheet(wb,ws,"Masraflar")
-
-    XLSX.writeFile(wb,"masraf-raporu.xlsx")
-
+    const worksheet = XLSX.utils.json_to_sheet(rows)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Masraflar")
+    XLSX.writeFile(workbook, "masraf-raporu.xlsx")
   }
 
-  if(!session){
+  const dashboard = useMemo(() => {
+    const totalCount = expenses.length
+    const pendingCount = expenses.filter(
+      (e) => e.status === "submitted" || e.status === "under_review"
+    ).length
+    const approvedCount = expenses.filter((e) => e.status === "approved").length
+    const rejectedCount = expenses.filter((e) => e.status === "rejected").length
 
-    return(
+    const totalTry = expenses
+      .filter((e) => e.currency_code === "TRY")
+      .reduce((sum, e) => sum + Number(e.amount || 0), 0)
+
+    const totalUsd = expenses
+      .filter((e) => e.currency_code === "USD")
+      .reduce((sum, e) => sum + Number(e.amount || 0), 0)
+
+    const totalEur = expenses
+      .filter((e) => e.currency_code === "EUR")
+      .reduce((sum, e) => sum + Number(e.amount || 0), 0)
+
+    return {
+      totalCount,
+      pendingCount,
+      approvedCount,
+      rejectedCount,
+      totalTry,
+      totalUsd,
+      totalEur,
+    }
+  }, [expenses])
+
+  function roleName(roleId?: number | null) {
+    if (roleId === 1) return "Personel"
+    if (roleId === 2) return "Muhasebe"
+    if (roleId === 3) return "Yönetici"
+    return "-"
+  }
+
+  if (!session) {
+    return (
       <div style={pageStyle}>
+        <TopHeader />
 
-        <Header/>
-
-        <div style={loginCard}>
+        <div style={loginCardStyle}>
+          <h2 style={{ marginTop: 0, marginBottom: "10px" }}>Giriş Yap</h2>
 
           <form onSubmit={handleLogin}>
+            <div style={{ marginBottom: "12px" }}>
+              <label style={labelStyle}>Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
 
-            <input
-            value={email}
-            onChange={e=>setEmail(e.target.value)}
-            placeholder="email"
-            style={input}
-            />
+            <div style={{ marginBottom: "16px" }}>
+              <label style={labelStyle}>Şifre</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
 
-            <input
-            type="password"
-            value={password}
-            onChange={e=>setPassword(e.target.value)}
-            placeholder="şifre"
-            style={input}
-            />
-
-            <button style={button}>
-              Giriş Yap
+            <button type="submit" disabled={loading} style={primaryButtonStyle}>
+              {loading ? "Giriş yapılıyor..." : "Giriş Yap"}
             </button>
-
           </form>
 
-          {message}
-
+          {message && <div style={messageBoxStyle}>{message}</div>}
         </div>
-
       </div>
     )
-
   }
 
-  return(
-
+  return (
     <div style={pageStyle}>
+      <TopHeader />
 
-      <Header/>
+      <div style={topBarStyle}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: "18px", color: "#0f172a" }}>
+            Hoş geldiniz{profile?.full_name ? `, ${profile.full_name}` : ""}.
+          </div>
+          <div style={{ color: "#64748b", marginTop: "4px" }}>
+            Rol: {roleName(profile?.role_id)}
+          </div>
+        </div>
 
-      <button onClick={handleLogout}>
-        Çıkış Yap
-      </button>
+        <button type="button" onClick={handleLogout} style={logoutButtonStyle}>
+          Çıkış Yap
+        </button>
+      </div>
 
-      <div style={grid}>
+      {message && (
+        <div style={{ ...messageBoxStyle, marginTop: "16px", marginBottom: "16px" }}>
+          {message}
+        </div>
+      )}
 
-        <div style={card}>
+      {(isMuhasebe || isYonetici) && (
+        <div style={dashboardGridStyle}>
+          <div style={dashboardCardStyle}>
+            <div style={dashboardTitleStyle}>Toplam Kayıt</div>
+            <div style={dashboardValueStyle}>{dashboard.totalCount}</div>
+          </div>
 
-          <h3>Yeni Masraf</h3>
+          <div style={dashboardCardStyle}>
+            <div style={dashboardTitleStyle}>Bekleyen</div>
+            <div style={dashboardValueStyle}>{dashboard.pendingCount}</div>
+          </div>
+
+          <div style={dashboardCardStyle}>
+            <div style={dashboardTitleStyle}>Onaylanan</div>
+            <div style={dashboardValueStyle}>{dashboard.approvedCount}</div>
+          </div>
+
+          <div style={dashboardCardStyle}>
+            <div style={dashboardTitleStyle}>Reddedilen</div>
+            <div style={dashboardValueStyle}>{dashboard.rejectedCount}</div>
+          </div>
+
+          <div style={dashboardCardStyle}>
+            <div style={dashboardTitleStyle}>TRY Toplam</div>
+            <div style={dashboardValueStyle}>{dashboard.totalTry.toLocaleString("tr-TR")}</div>
+          </div>
+
+          <div style={dashboardCardStyle}>
+            <div style={dashboardTitleStyle}>USD Toplam</div>
+            <div style={dashboardValueStyle}>{dashboard.totalUsd.toLocaleString("tr-TR")}</div>
+          </div>
+
+          <div style={dashboardCardStyle}>
+            <div style={dashboardTitleStyle}>EUR Toplam</div>
+            <div style={dashboardValueStyle}>{dashboard.totalEur.toLocaleString("tr-TR")}</div>
+          </div>
+        </div>
+      )}
+
+      <div style={mainGridStyle}>
+        <div style={cardStyle}>
+          <h2 style={sectionTitleStyle}>Yeni Masraf</h2>
 
           <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: "14px" }}>
+              <label style={labelStyle}>Departman</label>
+              <select
+                value={departmentId}
+                onChange={(e) => setDepartmentId(e.target.value)}
+                style={inputStyle}
+              >
+                {departments.map((department) => (
+                  <option key={department.id} value={department.id}>
+                    {department.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-            <select
-            value={departmentId}
-            onChange={e=>setDepartmentId(e.target.value)}
-            style={input}
-            >
-              {departments.map(d=>(
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
+            <div style={{ marginBottom: "14px" }}>
+              <label style={labelStyle}>Kategori</label>
+              <select
+                value={categoryId}
+                onChange={(e) => setCategoryId(e.target.value)}
+                style={inputStyle}
+              >
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-            <select
-            value={categoryId}
-            onChange={e=>setCategoryId(e.target.value)}
-            style={input}
-            >
-              {categories.map(c=>(
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            <div style={{ marginBottom: "14px" }}>
+              <label style={labelStyle}>Harcama Tarihi</label>
+              <input
+                type="date"
+                value={expenseDate}
+                onChange={(e) => setExpenseDate(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
 
-            <input
-            type="date"
-            value={expenseDate}
-            onChange={e=>setExpenseDate(e.target.value)}
-            style={input}
-            />
+            <div style={{ marginBottom: "14px" }}>
+              <label style={labelStyle}>Tedarikçi / Firma</label>
+              <input
+                type="text"
+                value={vendorName}
+                onChange={(e) => setVendorName(e.target.value)}
+                placeholder="Firma"
+                style={inputStyle}
+              />
+            </div>
 
-            <input
-            value={vendorName}
-            onChange={e=>setVendorName(e.target.value)}
-            placeholder="firma"
-            style={input}
-            />
+            <div style={{ marginBottom: "14px" }}>
+              <label style={labelStyle}>Açıklama</label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Masraf açıklaması"
+                rows={4}
+                style={{ ...inputStyle, resize: "vertical", minHeight: "110px" }}
+              />
+            </div>
 
-            <textarea
-            value={description}
-            onChange={e=>setDescription(e.target.value)}
-            placeholder="açıklama"
-            style={input}
-            />
-
-            <input
-            type="number"
-            value={amount}
-            onChange={e=>setAmount(e.target.value)}
-            placeholder="tutar"
-            style={input}
-            />
-
-            <input
-            type="file"
-            onChange={e=>setSelectedFile(e.target.files?.[0]||null)}
-            style={input}
-            />
-
-            <button style={button}>
-              Kaydet
-            </button>
-
-          </form>
-
-        </div>
-
-        <div style={card}>
-
-          <h3>Masraflar</h3>
-
-          <button onClick={exportExcel}>
-            Excel indir
-          </button>
-
-          {expenses.map(e=>(
-            <div key={e.id} style={expenseCard}>
-
-              <b>{e.expense_no}</b>
-
-              <div>{e.description}</div>
-
+            <div style={twoColGridStyle}>
               <div>
-                {e.amount} {e.currency_code}
+                <label style={labelStyle}>Tutar</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0.00"
+                  style={inputStyle}
+                />
               </div>
 
+              <div>
+                <label style={labelStyle}>Para Birimi</label>
+                <select
+                  value={currencyCode}
+                  onChange={(e) => setCurrencyCode(e.target.value)}
+                  style={inputStyle}
+                >
+                  <option value="TRY">TRY</option>
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                </select>
+              </div>
             </div>
-          ))}
 
+            <div style={{ marginBottom: "14px" }}>
+              <label style={labelStyle}>Ödeme Tipi</label>
+              <select
+                value={paymentType}
+                onChange={(e) => setPaymentType(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="cash">Nakit</option>
+                <option value="company_card">Şirket Kartı</option>
+                <option value="personal_card">Kişisel Kart</option>
+                <option value="bank_transfer">Havale / EFT</option>
+              </select>
+            </div>
+
+            <div style={{ marginBottom: "18px" }}>
+              <label style={labelStyle}>Fiş / Fatura</label>
+              <input
+                id="expense-file"
+                type="file"
+                accept="image/*,.pdf"
+                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                style={inputStyle}
+              />
+            </div>
+
+            <button type="submit" disabled={loading} style={primaryButtonStyle}>
+              {loading ? "Kaydediliyor..." : "Kaydet"}
+            </button>
+          </form>
         </div>
 
+        <div style={cardStyle}>
+          <div style={listHeaderStyle}>
+            <h2 style={sectionTitleStyle}>
+              {isPersonel
+                ? "Masraflarım"
+                : isMuhasebe
+                ? "Bekleyen Masraflar"
+                : "Tüm Masraflar"}
+            </h2>
+
+            <button type="button" onClick={exportExcel} style={secondaryButtonStyle}>
+              Excel İndir
+            </button>
+          </div>
+
+          <div style={filterGridStyle}>
+            <input
+              type="text"
+              placeholder="Masraf no, açıklama, firma ara"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              style={inputStyle}
+            />
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="all">Tüm durumlar</option>
+              <option value="pending">Bekleyenler</option>
+              <option value="submitted">Submitted</option>
+              <option value="under_review">Under Review</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              style={inputStyle}
+            />
+
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              style={inputStyle}
+            />
+          </div>
+
+          {filteredExpenses.length === 0 ? (
+            <p style={{ color: "#64748b" }}>Kayıt yok.</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {filteredExpenses.map((expense) => (
+                <div key={expense.id} style={expenseCardStyle}>
+                  <div style={expenseTopRowStyle}>
+                    <strong style={{ fontSize: "18px" }}>{expense.expense_no}</strong>
+                    <span style={{ fontWeight: 700 }}>
+                      {expense.amount} {expense.currency_code}
+                    </span>
+                  </div>
+
+                  <div style={{ marginTop: "8px", color: "#334155" }}>
+                    {expense.description}
+                  </div>
+
+                  <div style={expenseInfoStyle}>
+                    <div>Tarih: {expense.expense_date}</div>
+                    <div>Departman: {expense.departments?.[0]?.name || "-"}</div>
+                    <div>Kategori: {expense.categories?.[0]?.name || "-"}</div>
+                    <div>Tedarikçi: {expense.vendor_name || "-"}</div>
+                    <div>Ödeme Tipi: {expense.payment_type}</div>
+                    <div>Durum: {expense.status}</div>
+                  </div>
+
+                  {expense.expense_files?.[0]?.file_url && (
+                    <div style={{ marginTop: "10px" }}>
+                      <a
+                        href={expense.expense_files[0].file_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={fileLinkStyle}
+                      >
+                        Fiş / Fatura Aç
+                      </a>
+                    </div>
+                  )}
+
+                  {canApproveReject && (
+                    <div style={actionRowStyle}>
+                      <button
+                        type="button"
+                        disabled={actionLoadingId === expense.id}
+                        onClick={() =>
+                          updateExpenseStatus(expense.id, expense.status, "approved")
+                        }
+                        style={greenButtonStyle}
+                      >
+                        {actionLoadingId === expense.id ? "İşleniyor..." : "Onayla"}
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={actionLoadingId === expense.id}
+                        onClick={() =>
+                          updateExpenseStatus(expense.id, expense.status, "rejected")
+                        }
+                        style={redButtonStyle}
+                      >
+                        {actionLoadingId === expense.id ? "İşleniyor..." : "Reddet"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-
     </div>
-
   )
-
 }
 
-function Header(){
+function TopHeader() {
+  return (
+    <div style={headerWrapStyle}>
+      <div style={headerInnerStyle}>
+        <Image
+          src="/logo.png"
+          alt="Özen İplik"
+          width={220}
+          height={120}
+          style={{ objectFit: "contain", width: "100%", height: "auto", maxWidth: "220px" }}
+          priority
+        />
 
-  return(
-
-    <div style={header}>
-
-      <Image
-      src="/logo.png"
-      alt="Özen İplik"
-      width={120}
-      height={60}
-      />
-
-      <div style={title}>
-        MASRAF SİSTEMİ
+        <div style={headerTitleStyle}>MASRAF SİSTEMİ</div>
       </div>
-
     </div>
-
   )
-
 }
 
-const pageStyle:React.CSSProperties={
-  padding:"20px",
-  fontFamily:"Arial"
+const pageStyle: React.CSSProperties = {
+  minHeight: "100vh",
+  background: "#f8fafc",
+  padding: "16px",
+  fontFamily: "Arial, sans-serif",
 }
 
-const header:React.CSSProperties={
-  display:"flex",
-  alignItems:"center",
-  gap:"15px",
-  borderBottom:"3px solid #0f172a",
-  paddingBottom:"10px",
-  marginBottom:"20px"
+const headerWrapStyle: React.CSSProperties = {
+  marginBottom: "22px",
+  borderBottom: "4px solid #0f172a",
+  paddingBottom: "14px",
 }
 
-const title:React.CSSProperties={
-  fontSize:"28px",
-  fontWeight:800
+const headerInnerStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+  textAlign: "center",
+  gap: "8px",
 }
 
-const grid:React.CSSProperties={
-  display:"grid",
-  gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",
-  gap:"20px"
+const headerTitleStyle: React.CSSProperties = {
+  fontSize: "clamp(18px, 3vw, 26px)",
+  fontWeight: 700,
+  letterSpacing: "1px",
+  color: "#0f172a",
 }
 
-const card:React.CSSProperties={
-  background:"#fff",
-  padding:"20px",
-  borderRadius:"10px",
-  boxShadow:"0 5px 20px rgba(0,0,0,0.1)"
+const topBarStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "12px",
+  flexWrap: "wrap",
+  marginBottom: "18px",
 }
 
-const loginCard:React.CSSProperties={
-  maxWidth:"400px",
-  margin:"auto"
+const mainGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+  gap: "24px",
+  alignItems: "start",
 }
 
-const input:React.CSSProperties={
-  width:"100%",
-  padding:"10px",
-  marginBottom:"10px"
+const dashboardGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: "16px",
+  marginTop: "8px",
+  marginBottom: "24px",
 }
 
-const button:React.CSSProperties={
-  padding:"10px",
-  background:"#0f172a",
-  color:"#fff",
-  border:"none",
-  cursor:"pointer"
+const filterGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: "12px",
+  marginBottom: "16px",
 }
 
-const expenseCard:React.CSSProperties={
-  border:"1px solid #ddd",
-  padding:"10px",
-  marginTop:"10px"
+const twoColGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+  gap: "16px",
+  marginBottom: "16px",
+}
+
+const cardStyle: React.CSSProperties = {
+  background: "#ffffff",
+  borderRadius: "18px",
+  padding: "20px",
+  boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+  overflow: "hidden",
+}
+
+const loginCardStyle: React.CSSProperties = {
+  maxWidth: "420px",
+  margin: "50px auto 0 auto",
+  background: "#ffffff",
+  borderRadius: "18px",
+  padding: "24px",
+  boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+}
+
+const dashboardCardStyle: React.CSSProperties = {
+  background: "#ffffff",
+  borderRadius: "16px",
+  padding: "18px",
+  boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+}
+
+const dashboardTitleStyle: React.CSSProperties = {
+  fontSize: "14px",
+  color: "#64748b",
+  marginBottom: "8px",
+}
+
+const dashboardValueStyle: React.CSSProperties = {
+  fontSize: "28px",
+  fontWeight: 700,
+  color: "#0f172a",
+}
+
+const sectionTitleStyle: React.CSSProperties = {
+  marginTop: 0,
+  marginBottom: "16px",
+  fontSize: "28px",
+  color: "#0f172a",
+}
+
+const listHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "12px",
+  flexWrap: "wrap",
+  marginBottom: "16px",
+}
+
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  marginBottom: "6px",
+  fontWeight: 600,
+  color: "#0f172a",
+}
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "12px",
+  borderRadius: "10px",
+  border: "1px solid #cbd5e1",
+  boxSizing: "border-box",
+  fontSize: "14px",
+  minWidth: 0,
+  background: "#fff",
+}
+
+const primaryButtonStyle: React.CSSProperties = {
+  background: "#0f172a",
+  color: "#fff",
+  border: "none",
+  borderRadius: "10px",
+  padding: "12px 18px",
+  cursor: "pointer",
+  fontWeight: 700,
+  width: "100%",
+}
+
+const secondaryButtonStyle: React.CSSProperties = {
+  background: "#e2e8f0",
+  color: "#0f172a",
+  border: "none",
+  borderRadius: "10px",
+  padding: "10px 16px",
+  cursor: "pointer",
+  fontWeight: 600,
+}
+
+const logoutButtonStyle: React.CSSProperties = {
+  background: "#0f172a",
+  color: "#fff",
+  border: "none",
+  borderRadius: "10px",
+  padding: "10px 16px",
+  cursor: "pointer",
+  fontWeight: 700,
+}
+
+const greenButtonStyle: React.CSSProperties = {
+  background: "#16a34a",
+  color: "#fff",
+  border: "none",
+  borderRadius: "8px",
+  padding: "10px 14px",
+  cursor: "pointer",
+  fontWeight: 600,
+}
+
+const redButtonStyle: React.CSSProperties = {
+  background: "#dc2626",
+  color: "#fff",
+  border: "none",
+  borderRadius: "8px",
+  padding: "10px 14px",
+  cursor: "pointer",
+  fontWeight: 600,
+}
+
+const messageBoxStyle: React.CSSProperties = {
+  padding: "12px",
+  borderRadius: "10px",
+  background: "#e2e8f0",
+  color: "#0f172a",
+}
+
+const expenseCardStyle: React.CSSProperties = {
+  border: "1px solid #e2e8f0",
+  borderRadius: "12px",
+  padding: "14px",
+  background: "#f8fafc",
+}
+
+const expenseTopRowStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "12px",
+  flexWrap: "wrap",
+}
+
+const expenseInfoStyle: React.CSSProperties = {
+  marginTop: "8px",
+  fontSize: "14px",
+  color: "#64748b",
+  lineHeight: 1.6,
+}
+
+const fileLinkStyle: React.CSSProperties = {
+  color: "#2563eb",
+  textDecoration: "none",
+  fontWeight: 600,
+}
+
+const actionRowStyle: React.CSSProperties = {
+  display: "flex",
+  gap: "10px",
+  marginTop: "12px",
+  flexWrap: "wrap",
 }
