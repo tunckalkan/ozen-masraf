@@ -97,9 +97,7 @@ export default function Home() {
       }
     })
 
-    return () => {
-      subscription.unsubscribe()
-    }
+    return () => subscription.unsubscribe()
   }, [])
 
   useEffect(() => {
@@ -242,10 +240,12 @@ export default function Home() {
 
   async function handleLogout() {
     const { error } = await supabase.auth.signOut()
+
     if (error) {
       setMessage("Çıkış yapılamadı: " + error.message)
       return
     }
+
     setMessage("Çıkış yapıldı.")
   }
 
@@ -433,7 +433,7 @@ export default function Home() {
       Açıklama: e.description || "",
       Tutar: e.amount,
       ParaBirimi: e.currency_code,
-      ÖdemeTipi: e.payment_type,
+      OdemeTipi: e.payment_type,
       Durum: e.status,
     }))
 
@@ -487,16 +487,17 @@ export default function Home() {
         <TopHeader />
 
         <div style={loginCardStyle}>
-          <h2 style={{ marginTop: 0, marginBottom: "10px" }}>Giriş Yap</h2>
+          <h2 style={sectionTitleStyle}>Giriş Yap</h2>
 
           <form onSubmit={handleLogin}>
-            <div style={{ marginBottom: "12px" }}>
+            <div style={{ marginBottom: "14px" }}>
               <label style={labelStyle}>Email</label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 style={inputStyle}
+                placeholder="Email girin"
               />
             </div>
 
@@ -507,6 +508,7 @@ export default function Home() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 style={inputStyle}
+                placeholder="Şifre girin"
               />
             </div>
 
@@ -527,12 +529,10 @@ export default function Home() {
 
       <div style={topBarStyle}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: "18px", color: "#0f172a" }}>
-            Hoş geldiniz{profile?.full_name ? `, ${profile.full_name}` : ""}.
+          <div style={welcomeTitleStyle}>
+            Hoş geldiniz{profile?.full_name ? `, ${profile.full_name}` : ""}
           </div>
-          <div style={{ color: "#64748b", marginTop: "4px" }}>
-            Rol: {roleName(profile?.role_id)}
-          </div>
+          <div style={welcomeSubStyle}>Rol: {roleName(profile?.role_id)}</div>
         </div>
 
         <button type="button" onClick={handleLogout} style={logoutButtonStyle}>
@@ -541,7 +541,7 @@ export default function Home() {
       </div>
 
       {message && (
-        <div style={{ ...messageBoxStyle, marginTop: "16px", marginBottom: "16px" }}>
+        <div style={{ ...messageBoxStyle, marginBottom: "18px" }}>
           {message}
         </div>
       )}
@@ -636,7 +636,7 @@ export default function Home() {
                 type="text"
                 value={vendorName}
                 onChange={(e) => setVendorName(e.target.value)}
-                placeholder="Firma"
+                placeholder="Firma adı girin"
                 style={inputStyle}
               />
             </div>
@@ -646,9 +646,9 @@ export default function Home() {
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Masraf açıklaması"
+                placeholder="Masraf açıklaması yazın"
                 rows={4}
-                style={{ ...inputStyle, resize: "vertical", minHeight: "110px" }}
+                style={{ ...inputStyle, resize: "vertical", minHeight: "120px" }}
               />
             </div>
 
@@ -693,7 +693,7 @@ export default function Home() {
               </select>
             </div>
 
-            <div style={{ marginBottom: "18px" }}>
+            <div style={{ marginBottom: "20px" }}>
               <label style={labelStyle}>Fiş / Fatura</label>
               <input
                 id="expense-file"
@@ -843,12 +843,16 @@ function TopHeader() {
         <Image
           src="/logo.png"
           alt="Özen İplik"
-          width={220}
-          height={120}
-          style={{ objectFit: "contain", width: "100%", height: "auto", maxWidth: "220px" }}
+          width={260}
+          height={140}
+          style={{
+            objectFit: "contain",
+            width: "100%",
+            height: "auto",
+            maxWidth: "260px",
+          }}
           priority
         />
-
         <div style={headerTitleStyle}>MASRAF SİSTEMİ</div>
       </div>
     </div>
@@ -874,11 +878,11 @@ const headerInnerStyle: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "center",
   textAlign: "center",
-  gap: "8px",
+  gap: "10px",
 }
 
 const headerTitleStyle: React.CSSProperties = {
-  fontSize: "clamp(18px, 3vw, 26px)",
+  fontSize: "clamp(20px, 3vw, 28px)",
   fontWeight: 700,
   letterSpacing: "1px",
   color: "#0f172a",
@@ -893,9 +897,20 @@ const topBarStyle: React.CSSProperties = {
   marginBottom: "18px",
 }
 
+const welcomeTitleStyle: React.CSSProperties = {
+  fontWeight: 700,
+  fontSize: "18px",
+  color: "#0f172a",
+}
+
+const welcomeSubStyle: React.CSSProperties = {
+  color: "#64748b",
+  marginTop: "4px",
+}
+
 const mainGridStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
   gap: "24px",
   alignItems: "start",
 }
@@ -917,7 +932,7 @@ const filterGridStyle: React.CSSProperties = {
 
 const twoColGridStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
   gap: "16px",
   marginBottom: "16px",
 }
@@ -925,13 +940,13 @@ const twoColGridStyle: React.CSSProperties = {
 const cardStyle: React.CSSProperties = {
   background: "#ffffff",
   borderRadius: "18px",
-  padding: "20px",
+  padding: "24px",
   boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
   overflow: "hidden",
 }
 
 const loginCardStyle: React.CSSProperties = {
-  maxWidth: "420px",
+  maxWidth: "440px",
   margin: "50px auto 0 auto",
   background: "#ffffff",
   borderRadius: "18px",
@@ -960,8 +975,8 @@ const dashboardValueStyle: React.CSSProperties = {
 
 const sectionTitleStyle: React.CSSProperties = {
   marginTop: 0,
-  marginBottom: "16px",
-  fontSize: "28px",
+  marginBottom: "18px",
+  fontSize: "26px",
   color: "#0f172a",
 }
 
@@ -976,31 +991,34 @@ const listHeaderStyle: React.CSSProperties = {
 
 const labelStyle: React.CSSProperties = {
   display: "block",
-  marginBottom: "6px",
-  fontWeight: 600,
+  marginBottom: "7px",
+  fontWeight: 700,
   color: "#0f172a",
+  fontSize: "14px",
 }
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
-  padding: "12px",
-  borderRadius: "10px",
+  padding: "14px 14px",
+  borderRadius: "12px",
   border: "1px solid #cbd5e1",
   boxSizing: "border-box",
-  fontSize: "14px",
+  fontSize: "15px",
   minWidth: 0,
   background: "#fff",
+  color: "#0f172a",
 }
 
 const primaryButtonStyle: React.CSSProperties = {
   background: "#0f172a",
   color: "#fff",
   border: "none",
-  borderRadius: "10px",
-  padding: "12px 18px",
+  borderRadius: "12px",
+  padding: "14px 18px",
   cursor: "pointer",
   fontWeight: 700,
   width: "100%",
+  fontSize: "16px",
 }
 
 const secondaryButtonStyle: React.CSSProperties = {
@@ -1017,8 +1035,8 @@ const logoutButtonStyle: React.CSSProperties = {
   background: "#0f172a",
   color: "#fff",
   border: "none",
-  borderRadius: "10px",
-  padding: "10px 16px",
+  borderRadius: "12px",
+  padding: "12px 18px",
   cursor: "pointer",
   fontWeight: 700,
 }
@@ -1027,7 +1045,7 @@ const greenButtonStyle: React.CSSProperties = {
   background: "#16a34a",
   color: "#fff",
   border: "none",
-  borderRadius: "8px",
+  borderRadius: "10px",
   padding: "10px 14px",
   cursor: "pointer",
   fontWeight: 600,
@@ -1037,7 +1055,7 @@ const redButtonStyle: React.CSSProperties = {
   background: "#dc2626",
   color: "#fff",
   border: "none",
-  borderRadius: "8px",
+  borderRadius: "10px",
   padding: "10px 14px",
   cursor: "pointer",
   fontWeight: 600,
@@ -1052,8 +1070,8 @@ const messageBoxStyle: React.CSSProperties = {
 
 const expenseCardStyle: React.CSSProperties = {
   border: "1px solid #e2e8f0",
-  borderRadius: "12px",
-  padding: "14px",
+  borderRadius: "14px",
+  padding: "16px",
   background: "#f8fafc",
 }
 
@@ -1066,10 +1084,10 @@ const expenseTopRowStyle: React.CSSProperties = {
 }
 
 const expenseInfoStyle: React.CSSProperties = {
-  marginTop: "8px",
+  marginTop: "10px",
   fontSize: "14px",
   color: "#64748b",
-  lineHeight: 1.6,
+  lineHeight: 1.7,
 }
 
 const fileLinkStyle: React.CSSProperties = {
@@ -1081,6 +1099,6 @@ const fileLinkStyle: React.CSSProperties = {
 const actionRowStyle: React.CSSProperties = {
   display: "flex",
   gap: "10px",
-  marginTop: "12px",
+  marginTop: "14px",
   flexWrap: "wrap",
 }
