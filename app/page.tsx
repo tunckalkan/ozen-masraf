@@ -198,14 +198,10 @@ export default function Home() {
         expense_files(file_url, file_name)
       `)
       .order("id", { ascending: false })
-      .limit(200)
+      .limit(500)
 
     if (isPersonel) {
       query = query.eq("user_id", session.user.id)
-    }
-
-    if (isMuhasebe) {
-      query = query.in("status", ["submitted", "under_review"])
     }
 
     const { data, error } = await query
@@ -432,18 +428,18 @@ export default function Home() {
   }, [expenses, searchText, statusFilter, dateFrom, dateTo])
 
   function exportExcel() {
-    if (filteredExpenses.length === 0) {
+    if (expenses.length === 0) {
       setMessage("İndirilecek kayıt bulunamadı.")
       return
     }
 
-    const rows = filteredExpenses.map((e) => ({
+    const rows = expenses.map((e) => ({
       MasrafNo: e.expense_no,
       Tarih: e.expense_date,
       Departman: e.departments?.[0]?.name || "",
       Kategori: e.categories?.[0]?.name || "",
-      Tedarikçi: e.vendor_name || "",
-      Açıklama: e.description || "",
+      Tedarikci: e.vendor_name || "",
+      Aciklama: e.description || "",
       Tutar: e.amount,
       ParaBirimi: e.currency_code,
       OdemeTipi: e.payment_type,
@@ -729,7 +725,7 @@ export default function Home() {
               {isPersonel
                 ? "Masraflarım"
                 : isMuhasebe
-                ? "Bekleyen Masraflar"
+                ? "Masraflar"
                 : "Tüm Masraflar"}
             </h2>
 
@@ -814,31 +810,32 @@ export default function Home() {
                     </div>
                   )}
 
-                  {canApproveReject && (
-                    <div style={actionRowStyle}>
-                      <button
-                        type="button"
-                        disabled={actionLoadingId === expense.id}
-                        onClick={() =>
-                          updateExpenseStatus(expense.id, expense.status, "approved")
-                        }
-                        style={greenButtonStyle}
-                      >
-                        {actionLoadingId === expense.id ? "İşleniyor..." : "Onayla"}
-                      </button>
+                  {canApproveReject &&
+                    (expense.status === "submitted" || expense.status === "under_review") && (
+                      <div style={actionRowStyle}>
+                        <button
+                          type="button"
+                          disabled={actionLoadingId === expense.id}
+                          onClick={() =>
+                            updateExpenseStatus(expense.id, expense.status, "approved")
+                          }
+                          style={greenButtonStyle}
+                        >
+                          {actionLoadingId === expense.id ? "İşleniyor..." : "Onayla"}
+                        </button>
 
-                      <button
-                        type="button"
-                        disabled={actionLoadingId === expense.id}
-                        onClick={() =>
-                          updateExpenseStatus(expense.id, expense.status, "rejected")
-                        }
-                        style={redButtonStyle}
-                      >
-                        {actionLoadingId === expense.id ? "İşleniyor..." : "Reddet"}
-                      </button>
-                    </div>
-                  )}
+                        <button
+                          type="button"
+                          disabled={actionLoadingId === expense.id}
+                          onClick={() =>
+                            updateExpenseStatus(expense.id, expense.status, "rejected")
+                          }
+                          style={redButtonStyle}
+                        >
+                          {actionLoadingId === expense.id ? "İşleniyor..." : "Reddet"}
+                        </button>
+                      </div>
+                    )}
                 </div>
               ))}
             </div>
