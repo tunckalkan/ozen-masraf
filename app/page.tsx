@@ -351,45 +351,58 @@ export default function Home() {
     oldStatus: string,
     newStatus: "approved" | "rejected"
   ) {
-    if (!session?.user?.id || !canApproveReject) return
+    if (!session?.user?.id || !canApproveReject) {
+      setMessage("Bu işlem için yetkiniz yok.")
+      return
+    }
 
     setMessage("")
     setActionLoadingId(expenseId)
 
-    const updatePayload: any = {
-      status: newStatus,
-      approved_by: session.user.id,
-      approved_at: newStatus === "approved" ? new Date().toISOString() : null,
-    }
+    try {
+      const updatePayload: any = {
+        status: newStatus,
+        approved_by: session.user.id,
+        approved_at: newStatus === "approved" ? new Date().toISOString() : null,
+      }
 
-    if (newStatus === "rejected") {
-      updatePayload.rejection_reason = "Muhasebe tarafından reddedildi"
-    }
+      if (newStatus === "rejected") {
+        updatePayload.rejection_reason = "Muhasebe tarafından reddedildi"
+      }
 
-    const { error: updateError } = await supabase
-      .from("expenses")
-      .update(updatePayload)
-      .eq("id", expenseId)
+      const { error: updateError } = await supabase
+        .from("expenses")
+        .update(updatePayload)
+        .eq("id", expenseId)
 
-    if (updateError) {
-      setMessage("Durum güncellenemedi: " + updateError.message)
+      if (updateError) {
+        throw new Error("Masraf güncellenemedi: " + updateError.message)
+      }
+
+      const { error: logError } = await supabase
+        .from("expense_status_logs")
+        .insert([
+          {
+            expense_id: expenseId,
+            action_by: session.user.id,
+            old_status: oldStatus,
+            new_status: newStatus,
+            note: newStatus === "approved" ? "Kayıt onaylandı" : "Kayıt reddedildi",
+          },
+        ])
+
+      if (logError) {
+        throw new Error("Log kaydı yazılamadı: " + logError.message)
+      }
+
+      setMessage(newStatus === "approved" ? "Masraf onaylandı." : "Masraf reddedildi.")
+      await fetchExpenses()
+    } catch (err: any) {
+      console.error("Durum güncelleme hatası:", err)
+      setMessage(err?.message || "İşlem sırasında hata oluştu.")
+    } finally {
       setActionLoadingId(null)
-      return
     }
-
-    await supabase.from("expense_status_logs").insert([
-      {
-        expense_id: expenseId,
-        action_by: session.user.id,
-        old_status: oldStatus,
-        new_status: newStatus,
-        note: newStatus === "approved" ? "Kayıt onaylandı" : "Kayıt reddedildi",
-      },
-    ])
-
-    setMessage(newStatus === "approved" ? "Masraf onaylandı." : "Masraf reddedildi.")
-    setActionLoadingId(null)
-    fetchExpenses()
   }
 
   const filteredExpenses = useMemo(() => {
