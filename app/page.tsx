@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 import Image from "next/image"
 import * as XLSX from "xlsx"
 import { supabase } from "../lib/supabaseClient"
@@ -46,6 +47,8 @@ type Profile = {
 }
 
 export default function Home() {
+  const router = useRouter()
+
   const [session, setSession] = useState<any>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
 
@@ -235,14 +238,27 @@ export default function Home() {
   }
 
   async function handleLogout() {
-    const { error } = await supabase.auth.signOut()
+    setMessage("")
 
-    if (error) {
-      setMessage("Çıkış yapılamadı: " + error.message)
-      return
+    try {
+      const { error } = await supabase.auth.signOut()
+
+      if (error) {
+        setMessage("Çıkış yapılamadı: " + error.message)
+        return
+      }
+
+      setSession(null)
+      setProfile(null)
+      setExpenses([])
+      setMessage("Çıkış yapıldı.")
+
+      router.refresh()
+      window.location.reload()
+    } catch (err) {
+      console.error("Logout hatası:", err)
+      setMessage("Çıkış yapılamadı.")
     }
-
-    setMessage("Çıkış yapıldı.")
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -722,11 +738,7 @@ export default function Home() {
         <div style={cardStyle}>
           <div style={listHeaderStyle}>
             <h2 style={sectionTitleStyle}>
-              {isPersonel
-                ? "Masraflarım"
-                : isMuhasebe
-                ? "Masraflar"
-                : "Tüm Masraflar"}
+              {isPersonel ? "Masraflarım" : isMuhasebe ? "Masraflar" : "Tüm Masraflar"}
             </h2>
 
             <button type="button" onClick={exportExcel} style={secondaryButtonStyle}>
