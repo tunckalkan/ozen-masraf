@@ -95,12 +95,20 @@ export default function Page() {
       .from("profiles")
       .select("id, full_name, email, department_id, role_id")
       .eq("id", userId)
-      .single()
+      .maybeSingle()
 
     if (error) {
       console.error("Profile error:", error)
       setProfile(null)
-      setMessage("Profil alınamadı.")
+      setMessage(
+        `Profil hatası: ${error.message} | code: ${error.code || "-"} | userId: ${userId}`
+      )
+      return
+    }
+
+    if (!data) {
+      setProfile(null)
+      setMessage(`Profil bulunamadı. userId: ${userId}`)
       return
     }
 
@@ -142,17 +150,18 @@ export default function Page() {
       })
 
       if (error || !data.user) {
-        setMessage("Giriş hatası.")
+        setMessage(error ? `Giriş hatası: ${error.message}` : "Giriş hatası.")
         return
       }
 
       setUser(data.user)
       await loadProfile(data.user.id)
       await loadExpenses(data.user.id)
-      setMessage("Giriş başarılı.")
-    } catch (err) {
+
+      setMessage((prev) => (prev ? prev : "Giriş başarılı."))
+    } catch (err: any) {
       console.error("Login error:", err)
-      setMessage("Giriş sırasında hata oluştu.")
+      setMessage(`Giriş sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
       setLoading(false)
     }
@@ -210,7 +219,7 @@ export default function Page() {
 
       if (error) {
         console.error("Insert error:", error)
-        setMessage("Masraf kaydedilemedi.")
+        setMessage(`Masraf kaydedilemedi: ${error.message}`)
         return
       }
 
@@ -220,9 +229,9 @@ export default function Page() {
       setAmount("")
       setMessage("Masraf kaydedildi.")
       await loadExpenses(user.id)
-    } catch (err) {
+    } catch (err: any) {
       console.error("Save error:", err)
-      setMessage("Masraf kaydı sırasında hata oluştu.")
+      setMessage(`Masraf kaydı sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
       setLoading(false)
     }
@@ -271,7 +280,11 @@ export default function Page() {
               </button>
             </form>
 
-            {message && <div style={messageStyle}>{message}</div>}
+            {message && (
+              <div style={{ ...messageStyle, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                {message}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -365,7 +378,11 @@ export default function Page() {
           </div>
         </div>
 
-        {message && <div style={messageStyle}>{message}</div>}
+        {message && (
+          <div style={{ ...messageStyle, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            {message}
+          </div>
+        )}
       </div>
     </div>
   )
