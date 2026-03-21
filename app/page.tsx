@@ -1,7 +1,8 @@
 ﻿"use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Image from "next/image"
+import * as XLSX from "xlsx"
 import { supabase } from "../lib/supabaseClient"
 
 type Profile = {
@@ -19,8 +20,11 @@ type Expense = {
   vendor_name: string | null
   description: string
   amount: number
+  currency_code: string | null
   status: string
   created_at: string
+  file_url?: string | null
+  file_name?: string | null
 }
 
 export default function Page() {
@@ -35,6 +39,11 @@ export default function Page() {
   const [vendorName, setVendorName] = useState("")
   const [description, setDescription] = useState("")
   const [amount, setAmount] = useState("")
+  const [currencyCode, setCurrencyCode] = useState("TRY")
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
 
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(false)
@@ -128,7 +137,21 @@ export default function Page() {
 
     let query = supabase
       .from("expenses")
-      .select("id, user_id, expense_date, vendor_name, description, amount, status, created_at")
+      .select(`
+        id,
+        user_id,
+        expense_date,
+        vendor_name,
+        description,
+        amount,
+        currency_code,
+        status,
+        created_at,
+        expense_files (
+          file_url,
+          file_name
+        )
+      `)
       .order("created_at", { ascending: false })
 
     if (activeProfile.role_id !== 2) {
@@ -143,7 +166,21 @@ export default function Page() {
       return
     }
 
-    setExpenses(data || [])
+    const mapped: Expense[] = (data || []).map((item: any) => ({
+      id: item.id,
+      user_id: item.user_id,
+      expense_date: item.expense_date,
+      vendor_name: item.vendor_name,
+      description: item.description,
+      amount: item.amount,
+      currency_code: item.currency_code,
+      status: item.status,
+      created_at: item.created_at,
+      file_url: item.expense_files?.[0]?.file_url || null,
+      file_name: item.expense_files?.[0]?.file_name || null,
+    }))
+
+    setExpenses(mapped)
   }
 
   function roleName(roleId?: number | null) {
@@ -204,6 +241,10 @@ export default function Page() {
       setVendorName("")
       setDescription("")
       setAmount("")
+      setCurrencyCode("TRY")
+      setSelectedFile(null)
+      setDateFrom("")
+      setDateTo("")
       setEmail("test@ozeniplik.com")
       setPassword("123456")
       setMessage("Çıkış yapıldı.")
@@ -232,31 +273,71 @@ export default function Page() {
     setLoading(true)
 
     try {
-      const { error } = await supabase.from("expenses").insert([
-        {
-          user_id: user.id,
-          expense_date: expenseDate,
-          vendor_name: vendorName || null,
-          description,
-          amount: Number(amount),
-          currency_code: "TRY",
-          payment_type: "personal_card",
-          status: "submitted",
-          department_id: profile.department_id || 1,
-          category_id: 1,
-        },
-      ])
+      const { data: inserted, error } = await supabase
+        .from("expenses")
+        .insert([
+          {
+            user_id: user.id,
+            expense_date: expenseDate,
+            vendor_name: vendorName || null,
+            description,
+            amount: Number(amount),
+            currency_code: currencyCode,
+            payment_type: "personal_card",
+            status: "submitted",
+            department_id: profile.department_id || 1,
+            category_id: 1,
+          },
+        ])
+        .select("id")
+        .single()
 
-      if (error) {
+      if (error || !inserted) {
         console.error("Insert error:", error)
-        setMessage(`Masraf kaydedilemedi: ${error.message}`)
+        setMessage(`Masraf kaydedilemedi: ${error?.message || "hata"}`)
         return
+      }
+
+      if (selectedFile) {
+        const safeName = `${Date.now()}_${selectedFile.name.replace(/\s+/g, "_")}`
+        const filePath = `expenses/${inserted.id}/${safeName}`
+
+        const { error: uploadError } = await supabase.storage
+          .from("expense-files")
+          .upload(filePath, selectedFile, {
+            cacheControl: "3600",
+            upsert: false,
+            contentType: selectedFile.type,
+          })
+
+        if (uploadError) {
+          console.error("Upload error:", uploadError)
+          setMessage(`Masraf kaydedildi fakat dosya yüklenemedi: ${uploadError.message}`)
+        } else {
+          const { data: publicData } = supabase.storage.from("expense-files").getPublicUrl(filePath)
+
+          await supabase.from("expense_files").insert([
+            {
+              expense_id: inserted.id,
+              file_name: selectedFile.name,
+              file_path: filePath,
+              file_url: publicData.publicUrl,
+              uploaded_by: user.id,
+            },
+          ])
+        }
       }
 
       setExpenseDate("")
       setVendorName("")
       setDescription("")
       setAmount("")
+      setCurrencyCode("TRY")
+      setSelectedFile(null)
+
+      const fileInput = document.getElementById("expense-file") as HTMLInputElement | null
+      if (fileInput) fileInput.value = ""
+
       setMessage("Masraf kaydedildi.")
       await loadExpenses(user.id, profile)
     } catch (err: any) {
@@ -280,6 +361,7 @@ export default function Page() {
           status: "approved",
           approved_by: user.id,
           approved_at: new Date().toISOString(),
+          rejection_reason: null,
         })
         .eq("id", expenseId)
 
@@ -326,6 +408,36 @@ export default function Page() {
     } finally {
       setActionLoadingId(null)
     }
+  }
+
+  const filteredExpenses = useMemo(() => {
+    return expenses.filter((item) => {
+      const okFrom = !dateFrom || item.expense_date >= dateFrom
+      const okTo = !dateTo || item.expense_date <= dateTo
+      return okFrom && okTo
+    })
+  }, [expenses, dateFrom, dateTo])
+
+  function exportExcel() {
+    if (filteredExpenses.length === 0) {
+      setMessage("Excel için kayıt bulunamadı.")
+      return
+    }
+
+    const rows = filteredExpenses.map((item) => ({
+      Tarih: item.expense_date,
+      Firma: item.vendor_name || "",
+      Açıklama: item.description,
+      Tutar: item.amount,
+      ParaBirimi: item.currency_code || "TRY",
+      Durum: item.status,
+      Dosya: item.file_url || "",
+    }))
+
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, "Masraflar")
+    XLSX.writeFile(wb, "masraflar.xlsx")
   }
 
   if (booting) {
@@ -444,6 +556,30 @@ export default function Page() {
                 />
               </div>
 
+              <div style={fieldWrapStyle}>
+                <label style={labelStyle}>Para Birimi</label>
+                <select
+                  value={currencyCode}
+                  onChange={(e) => setCurrencyCode(e.target.value)}
+                  style={inputStyle}
+                >
+                  <option value="TRY">TRY</option>
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                </select>
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={labelStyle}>Fiş / Fatura</label>
+                <input
+                  id="expense-file"
+                  type="file"
+                  accept="image/*,.pdf"
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                  style={inputStyle}
+                />
+              </div>
+
               <button type="submit" disabled={loading} style={primaryButtonStyle}>
                 {loading ? "Kaydediliyor..." : "Kaydet"}
               </button>
@@ -451,24 +587,63 @@ export default function Page() {
           </div>
 
           <div style={cardStyle}>
-            <h2 style={sectionTitleStyle}>
-              {isMuhasebe ? "Tüm Masraflar" : "Masraflarım"}
-            </h2>
+            <div style={listTopBarStyle}>
+              <h2 style={sectionTitleStyle}>
+                {isMuhasebe ? "Tüm Masraflar" : "Masraflarım"}
+              </h2>
 
-            {expenses.length === 0 ? (
+              <button onClick={exportExcel} style={excelButtonStyle}>
+                Excel Al
+              </button>
+            </div>
+
+            <div style={filterRowStyle}>
+              <div style={filterItemStyle}>
+                <label style={labelStyle}>Başlangıç</label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  style={inputStyle}
+                />
+              </div>
+
+              <div style={filterItemStyle}>
+                <label style={labelStyle}>Bitiş</label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+
+            {filteredExpenses.length === 0 ? (
               <div style={emptyStyle}>Kayıt yok.</div>
             ) : (
-              expenses.map((item) => (
+              filteredExpenses.map((item) => (
                 <div key={item.id} style={expenseRowStyle}>
                   <div style={expenseTitleStyle}>{item.description}</div>
                   <div style={expenseMetaStyle}>Tarih: {item.expense_date}</div>
                   <div style={expenseMetaStyle}>Firma: {item.vendor_name || "-"}</div>
-                  <div style={expenseMetaStyle}>Tutar: {item.amount} TRY</div>
+                  <div style={expenseMetaStyle}>
+                    Tutar: {item.amount} {item.currency_code || "TRY"}
+                  </div>
                   <div style={expenseMetaStyle}>Durum: {item.status}</div>
+
+                  {item.file_url && (
+                    <div style={expenseMetaStyle}>
+                      <a href={item.file_url} target="_blank" rel="noreferrer" style={fileLinkStyle}>
+                        Ek Dosya: {item.file_name || "Görüntüle"}
+                      </a>
+                    </div>
+                  )}
 
                   {isMuhasebe && item.status === "submitted" && (
                     <div style={actionRowStyle}>
                       <button
+                        type="button"
                         onClick={() => handleApprove(item.id)}
                         disabled={actionLoadingId === item.id}
                         style={approveButtonStyle}
@@ -477,6 +652,7 @@ export default function Page() {
                       </button>
 
                       <button
+                        type="button"
                         onClick={() => handleReject(item.id)}
                         disabled={actionLoadingId === item.id}
                         style={rejectButtonStyle}
@@ -675,6 +851,34 @@ const logoutButtonStyle: React.CSSProperties = {
   fontWeight: 700,
 }
 
+const excelButtonStyle: React.CSSProperties = {
+  background: "#e2e8f0",
+  color: "#0f172a",
+  border: "none",
+  borderRadius: "10px",
+  padding: "10px 14px",
+  cursor: "pointer",
+  fontWeight: 700,
+}
+
+const listTopBarStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "12px",
+  flexWrap: "wrap",
+  marginBottom: "12px",
+}
+
+const filterRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gap: "12px",
+  marginBottom: "16px",
+}
+
+const filterItemStyle: React.CSSProperties = {}
+
 const messageStyle: React.CSSProperties = {
   marginTop: "18px",
   padding: "12px 14px",
@@ -728,5 +932,11 @@ const rejectButtonStyle: React.CSSProperties = {
   borderRadius: "10px",
   padding: "10px 14px",
   cursor: "pointer",
+  fontWeight: 700,
+}
+
+const fileLinkStyle: React.CSSProperties = {
+  color: "#2563eb",
+  textDecoration: "none",
   fontWeight: 700,
 }
