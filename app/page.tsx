@@ -27,6 +27,7 @@ type Expense = {
   description: string
   amount: number
   currency_code: string | null
+  category: string | null
   status: string
   created_at: string
   file_url?: string | null
@@ -46,6 +47,7 @@ export default function Page() {
   const [description, setDescription] = useState("")
   const [amount, setAmount] = useState("")
   const [currencyCode, setCurrencyCode] = useState("TRY")
+  const [category, setCategory] = useState("Diğer")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
   const [dateFrom, setDateFrom] = useState("")
@@ -143,7 +145,7 @@ export default function Page() {
 
     let expenseQuery = supabase
       .from("expenses")
-      .select("id, user_id, expense_date, vendor_name, description, amount, currency_code, status, created_at")
+      .select("id, user_id, expense_date, vendor_name, description, amount, currency_code, category, status, created_at")
       .order("created_at", { ascending: false })
 
     if (activeProfile.role_id !== 2) {
@@ -166,6 +168,7 @@ export default function Page() {
       description: item.description,
       amount: item.amount,
       currency_code: item.currency_code,
+      category: item.category,
       status: item.status,
       created_at: item.created_at,
       file_url: null,
@@ -257,8 +260,10 @@ export default function Page() {
     setMessage("")
 
     try {
-      await supabase.auth.signOut()
-    } catch (err: any) {
+      supabase.auth.signOut().catch((err) => {
+        console.error("Logout background error:", err)
+      })
+    } catch (err) {
       console.error("Logout error:", err)
     } finally {
       setUser(null)
@@ -269,12 +274,14 @@ export default function Page() {
       setDescription("")
       setAmount("")
       setCurrencyCode("TRY")
+      setCategory("Diğer")
       setSelectedFile(null)
       setDateFrom("")
       setDateTo("")
+      setEmail("test@ozeniplik.com")
+      setPassword("123456")
       setLoading(false)
       setMessage("Çıkış yapıldı.")
-      window.location.reload()
     }
   }
 
@@ -305,6 +312,7 @@ export default function Page() {
             description,
             amount: Number(amount),
             currency_code: currencyCode,
+            category: category,
             payment_type: "personal_card",
             status: "submitted",
             department_id: profile.department_id || 1,
@@ -360,6 +368,7 @@ export default function Page() {
       setDescription("")
       setAmount("")
       setCurrencyCode("TRY")
+      setCategory("Diğer")
       setSelectedFile(null)
 
       const fileInput = document.getElementById("expense-file") as HTMLInputElement | null
@@ -392,7 +401,12 @@ export default function Page() {
         return
       }
 
-      await loadExpenses(user.id, profile)
+      setExpenses((prev) =>
+        prev.map((item) =>
+          item.id === expenseId ? { ...item, status: "approved" } : item
+        )
+      )
+
       setMessage("Masraf onaylandı.")
     } catch (err: any) {
       console.error("Approve error:", err)
@@ -419,7 +433,12 @@ export default function Page() {
         return
       }
 
-      await loadExpenses(user.id, profile)
+      setExpenses((prev) =>
+        prev.map((item) =>
+          item.id === expenseId ? { ...item, status: "rejected" } : item
+        )
+      )
+
       setMessage("Masraf reddedildi.")
     } catch (err: any) {
       console.error("Reject error:", err)
@@ -446,6 +465,7 @@ export default function Page() {
     const rows = filteredExpenses.map((item) => ({
       Tarih: item.expense_date,
       Firma: item.vendor_name || "",
+      Kategori: item.category || "",
       Açıklama: item.description,
       Tutar: item.amount,
       ParaBirimi: item.currency_code || "TRY",
@@ -589,6 +609,26 @@ export default function Page() {
               </div>
 
               <div style={fieldWrapStyle}>
+                <label style={labelStyle}>Kategori</label>
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  style={inputStyle}
+                >
+                  <option value="Konaklama">Konaklama</option>
+                  <option value="Ulaşım">Ulaşım</option>
+                  <option value="Yakıt">Yakıt</option>
+                  <option value="Satınalma">Satınalma</option>
+                  <option value="Yemek">Yemek</option>
+                  <option value="Temsil / Ağırlama">Temsil / Ağırlama</option>
+                  <option value="Ofis Gideri">Ofis Gideri</option>
+                  <option value="Kargo / Lojistik">Kargo / Lojistik</option>
+                  <option value="Bakım / Onarım">Bakım / Onarım</option>
+                  <option value="Diğer">Diğer</option>
+                </select>
+              </div>
+
+              <div style={fieldWrapStyle}>
                 <label style={labelStyle}>Fiş / Fatura</label>
                 <input
                   id="expense-file"
@@ -646,6 +686,7 @@ export default function Page() {
                   <div style={expenseTitleStyle}>{item.description}</div>
                   <div style={expenseMetaStyle}>Tarih: {item.expense_date}</div>
                   <div style={expenseMetaStyle}>Firma: {item.vendor_name || "-"}</div>
+                  <div style={expenseMetaStyle}>Kategori: {item.category || "-"}</div>
                   <div style={expenseMetaStyle}>
                     Tutar: {item.amount} {item.currency_code || "TRY"}
                   </div>
