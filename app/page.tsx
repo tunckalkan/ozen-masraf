@@ -85,15 +85,19 @@ export default function Home() {
   const canSeeAllExpenses = isMuhasebe || isYonetici || isAdmin
 
   useEffect(() => {
-    let mounted = true
+    let active = true
 
-    async function boot() {
+    const timeout = setTimeout(() => {
+      if (active) setAuthReady(true)
+    }, 3000)
+
+    async function init() {
       try {
         const {
           data: { session: currentSession },
         } = await supabase.auth.getSession()
 
-        if (!mounted) return
+        if (!active) return
 
         setSession(currentSession)
 
@@ -101,33 +105,33 @@ export default function Home() {
           await loadProfileAndData(currentSession.user.id)
         }
       } catch (err) {
-        console.error("Boot error:", err)
+        console.error("Init error:", err)
       } finally {
-        if (mounted) setAuthReady(true)
+        if (active) setAuthReady(true)
       }
     }
 
-    boot()
+    init()
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, currentSession) => {
-      if (!mounted) return
-
+    } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+      if (!active) return
       setSession(currentSession)
 
-      if (currentSession?.user?.id) {
-        await loadProfileAndData(currentSession.user.id)
-      } else {
+      if (!currentSession?.user?.id) {
         setProfile(null)
         setExpenses([])
+      } else {
+        loadProfileAndData(currentSession.user.id)
       }
 
       setAuthReady(true)
     })
 
     return () => {
-      mounted = false
+      active = false
+      clearTimeout(timeout)
       subscription.unsubscribe()
     }
   }, [])
@@ -169,7 +173,6 @@ export default function Home() {
     }
 
     setProfile(data)
-
     if (data.department_id) {
       setDepartmentId(String(data.department_id))
     }
@@ -208,10 +211,10 @@ export default function Home() {
   }
 
   async function fetchExpenses(userIdParam?: string, profileParam?: Profile | null) {
-    const activeUserId = userIdParam || session?.user?.id
-    const activeProfile = profileParam || profile
+    const uid = userIdParam || session?.user?.id
+    const p = profileParam || profile
 
-    if (!activeUserId || !activeProfile) return
+    if (!uid || !p) return
 
     let query = supabase
       .from("expenses")
@@ -234,8 +237,8 @@ export default function Home() {
       .order("created_at", { ascending: false })
       .limit(500)
 
-    if (!(activeProfile.role_id === 2 || activeProfile.role_id === 3 || activeProfile.role_id === 4)) {
-      query = query.eq("user_id", activeUserId)
+    if (!(p.role_id === 2 || p.role_id === 3 || p.role_id === 4)) {
+      query = query.eq("user_id", uid)
     }
 
     const { data, error } = await query
@@ -271,16 +274,10 @@ export default function Home() {
       }
 
       setSession(data.session)
-
-      const profileData = await fetchProfile(data.user.id)
-      if (!profileData) return
-
-      await fetchInitialData(profileData)
-      await fetchExpenses(data.user.id, profileData)
-
+      await loadProfileAndData(data.user.id)
       setMessage("Giriş başarılı.")
     } catch (err) {
-      console.error("Login catch:", err)
+      console.error("Login error:", err)
       setMessage("Giriş sırasında hata oluştu.")
     } finally {
       setLoading(false)
@@ -293,26 +290,18 @@ export default function Home() {
     setMessage("")
 
     try {
-      await supabase.auth.signOut()
+      const { error } = await supabase.auth.signOut()
+      if (error) {
+        setMessage("Çıkış yapılamadı.")
+        return
+      }
+
       setSession(null)
       setProfile(null)
       setExpenses([])
-      setDepartmentId("")
-      setCategoryId("")
-      setExpenseDate("")
-      setVendorName("")
-      setDescription("")
-      setAmount("")
-      setCurrencyCode("TRY")
-      setPaymentType("personal_card")
-      setSelectedFile(null)
-      setSearchText("")
-      setStatusFilter("all")
-      setDateFrom("")
-      setDateTo("")
       setMessage("Çıkış yapıldı.")
     } catch (err) {
-      console.error("Logout catch:", err)
+      console.error("Logout error:", err)
       setMessage("Çıkış yapılamadı.")
     } finally {
       setLoading(false)
@@ -323,7 +312,11 @@ export default function Home() {
     e.preventDefault()
     setMessage("")
 
-    if (!session?.user?.id || !profile) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user || !profile) {
       setMessage("Önce giriş yapmalısınız.")
       return
     }
@@ -340,7 +333,7 @@ export default function Home() {
         .from("expenses")
         .insert([
           {
-            user_id: session.user.id,
+            user_id: user.id,
             department_id: Number(departmentId),
             category_id: Number(categoryId),
             expense_date: expenseDate,
@@ -383,7 +376,7 @@ export default function Home() {
               file_name: selectedFile.name,
               file_path: filePath,
               file_url: publicUrlData.publicUrl,
-              uploaded_by: session.user.id,
+              uploaded_by: user.id,
             },
           ])
         }
@@ -392,7 +385,7 @@ export default function Home() {
       await supabase.from("expense_status_logs").insert([
         {
           expense_id: insertedExpense.id,
-          action_by: session.user.id,
+          action_by: user.id,
           old_status: null,
           new_status: "submitted",
           note: "Masraf kaydı oluşturuldu",
@@ -411,7 +404,7 @@ export default function Home() {
       if (fileInput) fileInput.value = ""
 
       setMessage("Masraf kaydı başarıyla eklendi.")
-      await fetchExpenses(session.user.id, profile)
+      await fetchExpenses(user.id, profile)
     } finally {
       setLoading(false)
     }
@@ -427,27 +420,23 @@ export default function Home() {
       return
     }
 
-    setMessage("")
     setActionLoadingId(expenseId)
+    setMessage("")
 
     try {
-      const updatePayload: any = {
-        status: newStatus,
-        approved_by: session.user.id,
-        approved_at: newStatus === "approved" ? new Date().toISOString() : null,
-      }
-
-      if (newStatus === "rejected") {
-        updatePayload.rejection_reason = "Muhasebe tarafından reddedildi"
-      }
-
-      const { error: updateError } = await supabase
+      const { error } = await supabase
         .from("expenses")
-        .update(updatePayload)
+        .update({
+          status: newStatus,
+          approved_by: session.user.id,
+          approved_at: newStatus === "approved" ? new Date().toISOString() : null,
+          rejection_reason: newStatus === "rejected" ? "Muhasebe tarafından reddedildi" : null,
+        })
         .eq("id", expenseId)
 
-      if (updateError) {
-        throw new Error("Masraf güncellenemedi.")
+      if (error) {
+        setMessage("Durum güncellenemedi.")
+        return
       }
 
       await supabase.from("expense_status_logs").insert([
@@ -462,9 +451,6 @@ export default function Home() {
 
       setMessage(newStatus === "approved" ? "Masraf onaylandı." : "Masraf reddedildi.")
       await fetchExpenses()
-    } catch (err: any) {
-      console.error("Status update error:", err)
-      setMessage("İşlem sırasında hata oluştu.")
     } finally {
       setActionLoadingId(null)
     }
@@ -515,10 +501,10 @@ export default function Home() {
       Durum: e.status,
     }))
 
-    const worksheet = XLSX.utils.json_to_sheet(rows)
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Masraflar")
-    XLSX.writeFile(workbook, "masraf-raporu.xlsx")
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, "Masraflar")
+    XLSX.writeFile(wb, "masraf-raporu.xlsx")
   }
 
   const dashboard = useMemo(() => {
@@ -529,27 +515,7 @@ export default function Home() {
     const approvedCount = expenses.filter((e) => e.status === "approved").length
     const rejectedCount = expenses.filter((e) => e.status === "rejected").length
 
-    const totalTry = expenses
-      .filter((e) => e.currency_code === "TRY")
-      .reduce((sum, e) => sum + Number(e.amount || 0), 0)
-
-    const totalUsd = expenses
-      .filter((e) => e.currency_code === "USD")
-      .reduce((sum, e) => sum + Number(e.amount || 0), 0)
-
-    const totalEur = expenses
-      .filter((e) => e.currency_code === "EUR")
-      .reduce((sum, e) => sum + Number(e.amount || 0), 0)
-
-    return {
-      totalCount,
-      pendingCount,
-      approvedCount,
-      rejectedCount,
-      totalTry,
-      totalUsd,
-      totalEur,
-    }
+    return { totalCount, pendingCount, approvedCount, rejectedCount }
   }, [expenses])
 
   function roleName(roleId?: number | null) {
@@ -577,25 +543,23 @@ export default function Home() {
           <h2 style={sectionTitleStyle}>Giriş Yap</h2>
 
           <form onSubmit={handleLogin}>
-            <div style={{ marginBottom: "14px" }}>
+            <div style={{ marginBottom: 14 }}>
               <label style={labelStyle}>Email</label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 style={inputStyle}
-                placeholder="Email girin"
               />
             </div>
 
-            <div style={{ marginBottom: "16px" }}>
+            <div style={{ marginBottom: 16 }}>
               <label style={labelStyle}>Şifre</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 style={inputStyle}
-                placeholder="Şifre girin"
               />
             </div>
 
@@ -617,57 +581,35 @@ export default function Home() {
       <div style={topBarStyle}>
         <div>
           <div style={welcomeTitleStyle}>
-            Hoş geldiniz{profile?.full_name ? `, ${profile.full_name}` : ""}
+            Hoş geldiniz{profile.full_name ? `, ${profile.full_name}` : ""}
           </div>
-          <div style={welcomeSubStyle}>Rol: {roleName(profile?.role_id)}</div>
+          <div style={welcomeSubStyle}>Rol: {roleName(profile.role_id)}</div>
         </div>
 
-        <button type="button" onClick={handleLogout} style={logoutButtonStyle}>
+        <button onClick={handleLogout} style={logoutButtonStyle}>
           Çıkış Yap
         </button>
       </div>
 
-      {message && (
-        <div style={{ ...messageBoxStyle, marginBottom: "18px" }}>
-          {message}
-        </div>
-      )}
+      {message && <div style={{ ...messageBoxStyle, marginBottom: 18 }}>{message}</div>}
 
       {canSeeAllExpenses && (
         <div style={dashboardGridStyle}>
           <div style={dashboardCardStyle}>
-            <div style={dashboardTitleStyle}>Toplam Kayıt</div>
+            <div style={dashboardTitleStyle}>Toplam</div>
             <div style={dashboardValueStyle}>{dashboard.totalCount}</div>
           </div>
-
           <div style={dashboardCardStyle}>
             <div style={dashboardTitleStyle}>Bekleyen</div>
             <div style={dashboardValueStyle}>{dashboard.pendingCount}</div>
           </div>
-
           <div style={dashboardCardStyle}>
             <div style={dashboardTitleStyle}>Onaylanan</div>
             <div style={dashboardValueStyle}>{dashboard.approvedCount}</div>
           </div>
-
           <div style={dashboardCardStyle}>
             <div style={dashboardTitleStyle}>Reddedilen</div>
             <div style={dashboardValueStyle}>{dashboard.rejectedCount}</div>
-          </div>
-
-          <div style={dashboardCardStyle}>
-            <div style={dashboardTitleStyle}>TRY Toplam</div>
-            <div style={dashboardValueStyle}>{dashboard.totalTry.toLocaleString("tr-TR")}</div>
-          </div>
-
-          <div style={dashboardCardStyle}>
-            <div style={dashboardTitleStyle}>USD Toplam</div>
-            <div style={dashboardValueStyle}>{dashboard.totalUsd.toLocaleString("tr-TR")}</div>
-          </div>
-
-          <div style={dashboardCardStyle}>
-            <div style={dashboardTitleStyle}>EUR Toplam</div>
-            <div style={dashboardValueStyle}>{dashboard.totalEur.toLocaleString("tr-TR")}</div>
           </div>
         </div>
       )}
@@ -677,88 +619,57 @@ export default function Home() {
           <h2 style={sectionTitleStyle}>Yeni Masraf</h2>
 
           <form onSubmit={handleSubmit}>
-            <div style={{ marginBottom: "14px" }}>
+            <div style={{ marginBottom: 14 }}>
               <label style={labelStyle}>Departman</label>
-              <select
-                value={departmentId}
-                onChange={(e) => setDepartmentId(e.target.value)}
-                style={inputStyle}
-              >
-                {departments.map((department) => (
-                  <option key={department.id} value={department.id}>
-                    {department.name}
+              <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} style={inputStyle}>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
                   </option>
                 ))}
               </select>
             </div>
 
-            <div style={{ marginBottom: "14px" }}>
+            <div style={{ marginBottom: 14 }}>
               <label style={labelStyle}>Kategori</label>
-              <select
-                value={categoryId}
-                onChange={(e) => setCategoryId(e.target.value)}
-                style={inputStyle}
-              >
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
+              <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} style={inputStyle}>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
                   </option>
                 ))}
               </select>
             </div>
 
-            <div style={{ marginBottom: "14px" }}>
+            <div style={{ marginBottom: 14 }}>
               <label style={labelStyle}>Harcama Tarihi</label>
-              <input
-                type="date"
-                value={expenseDate}
-                onChange={(e) => setExpenseDate(e.target.value)}
-                style={inputStyle}
-              />
+              <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} style={inputStyle} />
             </div>
 
-            <div style={{ marginBottom: "14px" }}>
+            <div style={{ marginBottom: 14 }}>
               <label style={labelStyle}>Tedarikçi / Firma</label>
-              <input
-                type="text"
-                value={vendorName}
-                onChange={(e) => setVendorName(e.target.value)}
-                placeholder="Firma adı girin"
-                style={inputStyle}
-              />
+              <input value={vendorName} onChange={(e) => setVendorName(e.target.value)} style={inputStyle} />
             </div>
 
-            <div style={{ marginBottom: "14px" }}>
+            <div style={{ marginBottom: 14 }}>
               <label style={labelStyle}>Açıklama</label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Masraf açıklaması yazın"
                 rows={4}
-                style={{ ...inputStyle, resize: "vertical", minHeight: "120px" }}
+                style={{ ...inputStyle, resize: "vertical", minHeight: 120 }}
               />
             </div>
 
             <div style={twoColGridStyle}>
               <div>
                 <label style={labelStyle}>Tutar</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0.00"
-                  style={inputStyle}
-                />
+                <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} style={inputStyle} />
               </div>
 
               <div>
                 <label style={labelStyle}>Para Birimi</label>
-                <select
-                  value={currencyCode}
-                  onChange={(e) => setCurrencyCode(e.target.value)}
-                  style={inputStyle}
-                >
+                <select value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value)} style={inputStyle}>
                   <option value="TRY">TRY</option>
                   <option value="USD">USD</option>
                   <option value="EUR">EUR</option>
@@ -766,13 +677,9 @@ export default function Home() {
               </div>
             </div>
 
-            <div style={{ marginBottom: "14px" }}>
+            <div style={{ marginBottom: 14 }}>
               <label style={labelStyle}>Ödeme Tipi</label>
-              <select
-                value={paymentType}
-                onChange={(e) => setPaymentType(e.target.value)}
-                style={inputStyle}
-              >
+              <select value={paymentType} onChange={(e) => setPaymentType(e.target.value)} style={inputStyle}>
                 <option value="cash">Nakit</option>
                 <option value="company_card">Şirket Kartı</option>
                 <option value="personal_card">Kişisel Kart</option>
@@ -780,7 +687,7 @@ export default function Home() {
               </select>
             </div>
 
-            <div style={{ marginBottom: "20px" }}>
+            <div style={{ marginBottom: 20 }}>
               <label style={labelStyle}>Fiş / Fatura</label>
               <input
                 id="expense-file"
@@ -799,11 +706,8 @@ export default function Home() {
 
         <div style={cardStyle}>
           <div style={listHeaderStyle}>
-            <h2 style={sectionTitleStyle}>
-              {isPersonel ? "Masraflarım" : "Masraflar"}
-            </h2>
-
-            <button type="button" onClick={exportExcel} style={secondaryButtonStyle}>
+            <h2 style={sectionTitleStyle}>{isPersonel ? "Masraflarım" : "Masraflar"}</h2>
+            <button onClick={exportExcel} style={secondaryButtonStyle}>
               Excel İndir
             </button>
           </div>
@@ -817,11 +721,7 @@ export default function Home() {
               style={inputStyle}
             />
 
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              style={inputStyle}
-            >
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={inputStyle}>
               <option value="all">Tüm durumlar</option>
               <option value="pending">Bekleyenler</option>
               <option value="submitted">Submitted</option>
@@ -830,37 +730,24 @@ export default function Home() {
               <option value="rejected">Rejected</option>
             </select>
 
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              style={inputStyle}
-            />
-
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              style={inputStyle}
-            />
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={inputStyle} />
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inputStyle} />
           </div>
 
           {filteredExpenses.length === 0 ? (
             <p style={{ color: "#64748b" }}>Kayıt yok.</p>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {filteredExpenses.map((expense) => (
                 <div key={expense.id} style={expenseCardStyle}>
                   <div style={expenseTopRowStyle}>
-                    <strong style={{ fontSize: "18px" }}>{expense.expense_no}</strong>
+                    <strong style={{ fontSize: 18 }}>{expense.expense_no}</strong>
                     <span style={{ fontWeight: 700 }}>
                       {expense.amount} {expense.currency_code}
                     </span>
                   </div>
 
-                  <div style={{ marginTop: "8px", color: "#334155" }}>
-                    {expense.description}
-                  </div>
+                  <div style={{ marginTop: 8, color: "#334155" }}>{expense.description}</div>
 
                   <div style={expenseInfoStyle}>
                     <div>Tarih: {expense.expense_date}</div>
@@ -872,13 +759,8 @@ export default function Home() {
                   </div>
 
                   {expense.expense_files?.[0]?.file_url && (
-                    <div style={{ marginTop: "10px" }}>
-                      <a
-                        href={expense.expense_files[0].file_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={fileLinkStyle}
-                      >
+                    <div style={{ marginTop: 10 }}>
+                      <a href={expense.expense_files[0].file_url} target="_blank" rel="noreferrer" style={fileLinkStyle}>
                         Fiş / Fatura Aç
                       </a>
                     </div>
@@ -890,9 +772,7 @@ export default function Home() {
                         <button
                           type="button"
                           disabled={actionLoadingId === expense.id}
-                          onClick={() =>
-                            updateExpenseStatus(expense.id, expense.status, "approved")
-                          }
+                          onClick={() => updateExpenseStatus(expense.id, expense.status, "approved")}
                           style={greenButtonStyle}
                         >
                           {actionLoadingId === expense.id ? "İşleniyor..." : "Onayla"}
@@ -901,9 +781,7 @@ export default function Home() {
                         <button
                           type="button"
                           disabled={actionLoadingId === expense.id}
-                          onClick={() =>
-                            updateExpenseStatus(expense.id, expense.status, "rejected")
-                          }
+                          onClick={() => updateExpenseStatus(expense.id, expense.status, "rejected")}
                           style={redButtonStyle}
                         >
                           {actionLoadingId === expense.id ? "İşleniyor..." : "Reddet"}
