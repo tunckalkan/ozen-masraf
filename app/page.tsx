@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
 import Image from "next/image"
 import * as XLSX from "xlsx"
 import { supabase } from "../lib/supabaseClient"
@@ -47,13 +46,12 @@ type Profile = {
 }
 
 export default function Home() {
-  const router = useRouter()
-
+  const [authReady, setAuthReady] = useState(false)
   const [session, setSession] = useState<any>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
 
   const [email, setEmail] = useState("test@ozeniplik.com")
-  const [password, setPassword] = useState("12345678Aa!")
+  const [password, setPassword] = useState("123456")
 
   const [departments, setDepartments] = useState<Department[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -81,106 +79,139 @@ export default function Home() {
   const isPersonel = profile?.role_id === 1
   const isMuhasebe = profile?.role_id === 2
   const isYonetici = profile?.role_id === 3
+  const isAdmin = profile?.role_id === 4
 
-  const canApproveReject = isMuhasebe
+  const canApproveReject = isMuhasebe || isAdmin
+  const canSeeAllExpenses = isMuhasebe || isYonetici || isAdmin
 
   useEffect(() => {
-    checkSession()
+    let mounted = true
+
+    async function boot() {
+      try {
+        const {
+          data: { session: currentSession },
+        } = await supabase.auth.getSession()
+
+        if (!mounted) return
+
+        setSession(currentSession)
+
+        if (currentSession?.user?.id) {
+          await loadProfileAndData(currentSession.user.id)
+        }
+      } catch (err) {
+        console.error("Boot error:", err)
+      } finally {
+        if (mounted) setAuthReady(true)
+      }
+    }
+
+    boot()
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, currentSession) => {
+      if (!mounted) return
+
       setSession(currentSession)
 
       if (currentSession?.user?.id) {
-        await fetchProfile(currentSession.user.id)
+        await loadProfileAndData(currentSession.user.id)
       } else {
         setProfile(null)
         setExpenses([])
       }
+
+      setAuthReady(true)
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
   }, [])
 
   useEffect(() => {
-    if (session?.user?.id) {
-      fetchInitialData()
-    }
-  }, [session])
-
-  useEffect(() => {
-    if (session?.user?.id && profile) {
-      fetchExpenses()
-    }
-  }, [session, profile])
-
-  useEffect(() => {
-    if (isMuhasebe) {
+    if (isMuhasebe || isAdmin) {
       setStatusFilter("pending")
     } else {
       setStatusFilter("all")
     }
-  }, [isMuhasebe])
+  }, [isMuhasebe, isAdmin])
 
-  async function checkSession() {
-    const {
-      data: { session: currentSession },
-    } = await supabase.auth.getSession()
-
-    setSession(currentSession)
-
-    if (currentSession?.user?.id) {
-      await fetchProfile(currentSession.user.id)
+  async function loadProfileAndData(userId: string) {
+    const profileData = await fetchProfile(userId)
+    await fetchInitialData(profileData)
+    if (profileData) {
+      await fetchExpenses(userId, profileData)
     }
   }
 
-  async function fetchProfile(userId: string) {
+  async function fetchProfile(userId: string): Promise<Profile | null> {
     const { data, error } = await supabase
       .from("profiles")
       .select("id, full_name, email, department_id, role_id")
       .eq("id", userId)
-      .single()
+      .maybeSingle()
 
     if (error) {
-      console.error("Profil çekme hatası:", error)
-      return
+      console.error("Profile error:", error)
+      setProfile(null)
+      setMessage("Profil alınamadı.")
+      return null
+    }
+
+    if (!data) {
+      setProfile(null)
+      setMessage("Profil bulunamadı.")
+      return null
     }
 
     setProfile(data)
 
-    if (data?.department_id) {
+    if (data.department_id) {
       setDepartmentId(String(data.department_id))
     }
+
+    return data as Profile
   }
 
-  async function fetchInitialData() {
-    const { data: departmentData } = await supabase
+  async function fetchInitialData(currentProfile?: Profile | null) {
+    const { data: depData } = await supabase
       .from("departments")
       .select("id, name")
       .eq("is_active", true)
       .order("id", { ascending: true })
 
-    const { data: categoryData } = await supabase
+    const { data: catData } = await supabase
       .from("categories")
       .select("id, name")
       .eq("is_active", true)
       .order("id", { ascending: true })
 
-    setDepartments(departmentData || [])
-    setCategories(categoryData || [])
+    const deps = depData || []
+    const cats = catData || []
 
-    if (!departmentId && departmentData && departmentData.length > 0) {
-      setDepartmentId(String(departmentData[0].id))
+    setDepartments(deps)
+    setCategories(cats)
+
+    if (currentProfile?.department_id) {
+      setDepartmentId(String(currentProfile.department_id))
+    } else if (deps.length > 0 && !departmentId) {
+      setDepartmentId(String(deps[0].id))
     }
 
-    if (categoryData && categoryData.length > 0) {
-      setCategoryId(String(categoryData[0].id))
+    if (cats.length > 0 && !categoryId) {
+      setCategoryId(String(cats[0].id))
     }
   }
 
-  async function fetchExpenses() {
-    if (!session?.user?.id || !profile) return
+  async function fetchExpenses(userIdParam?: string, profileParam?: Profile | null) {
+    const activeUserId = userIdParam || session?.user?.id
+    const activeProfile = profileParam || profile
+
+    if (!activeUserId || !activeProfile) return
 
     let query = supabase
       .from("expenses")
@@ -200,17 +231,18 @@ export default function Home() {
         categories(name),
         expense_files(file_url, file_name)
       `)
-      .order("id", { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(500)
 
-    if (isPersonel) {
-      query = query.eq("user_id", session.user.id)
+    if (!(activeProfile.role_id === 2 || activeProfile.role_id === 3 || activeProfile.role_id === 4)) {
+      query = query.eq("user_id", activeUserId)
     }
 
     const { data, error } = await query
 
     if (error) {
-      console.error("Masraf listeleme hatası:", error)
+      console.error("Expense error:", error)
+      setMessage("Masraflar alınamadı.")
       return
     }
 
@@ -222,42 +254,68 @@ export default function Home() {
     setMessage("")
     setLoading(true)
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
-
-    setLoading(false)
-
-    if (error) {
-      setMessage("Giriş hatası: " + error.message)
-      return
-    }
-
-    setMessage("Giriş başarılı.")
-  }
-
-  async function handleLogout() {
-    setMessage("")
-
     try {
-      const { error } = await supabase.auth.signOut()
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      })
 
       if (error) {
-        setMessage("Çıkış yapılamadı: " + error.message)
+        setMessage("Giriş hatası: " + error.message)
         return
       }
 
+      if (!data.user || !data.session) {
+        setMessage("Oturum alınamadı.")
+        return
+      }
+
+      setSession(data.session)
+
+      const profileData = await fetchProfile(data.user.id)
+      if (!profileData) return
+
+      await fetchInitialData(profileData)
+      await fetchExpenses(data.user.id, profileData)
+
+      setMessage("Giriş başarılı.")
+    } catch (err) {
+      console.error("Login catch:", err)
+      setMessage("Giriş sırasında hata oluştu.")
+    } finally {
+      setLoading(false)
+      setAuthReady(true)
+    }
+  }
+
+  async function handleLogout() {
+    setLoading(true)
+    setMessage("")
+
+    try {
+      await supabase.auth.signOut()
       setSession(null)
       setProfile(null)
       setExpenses([])
+      setDepartmentId("")
+      setCategoryId("")
+      setExpenseDate("")
+      setVendorName("")
+      setDescription("")
+      setAmount("")
+      setCurrencyCode("TRY")
+      setPaymentType("personal_card")
+      setSelectedFile(null)
+      setSearchText("")
+      setStatusFilter("all")
+      setDateFrom("")
+      setDateTo("")
       setMessage("Çıkış yapıldı.")
-
-      router.refresh()
-      window.location.reload()
     } catch (err) {
-      console.error("Logout hatası:", err)
+      console.error("Logout catch:", err)
       setMessage("Çıkış yapılamadı.")
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -277,85 +335,86 @@ export default function Home() {
 
     setLoading(true)
 
-    const { data: insertedExpense, error: expenseError } = await supabase
-      .from("expenses")
-      .insert([
-        {
-          user_id: session.user.id,
-          department_id: Number(departmentId),
-          category_id: Number(categoryId),
-          expense_date: expenseDate,
-          vendor_name: vendorName || null,
-          description,
-          amount: Number(amount),
-          currency_code: currencyCode,
-          payment_type: paymentType,
-          status: "submitted",
-        },
-      ])
-      .select()
-      .single()
-
-    if (expenseError || !insertedExpense) {
-      setLoading(false)
-      setMessage("Masraf kaydı sırasında hata oluştu.")
-      return
-    }
-
-    if (selectedFile) {
-      const safeFileName = selectedFile.name.replace(/\s+/g, "_")
-      const filePath = `expenses/${insertedExpense.id}/${Date.now()}_${safeFileName}`
-
-      const { error: uploadError } = await supabase.storage
-        .from("expense-files")
-        .upload(filePath, selectedFile, {
-          cacheControl: "3600",
-          upsert: false,
-          contentType: selectedFile.type,
-        })
-
-      if (!uploadError) {
-        const { data: publicUrlData } = supabase.storage
-          .from("expense-files")
-          .getPublicUrl(filePath)
-
-        await supabase.from("expense_files").insert([
+    try {
+      const { data: insertedExpense, error: expenseError } = await supabase
+        .from("expenses")
+        .insert([
           {
-            expense_id: insertedExpense.id,
-            file_name: selectedFile.name,
-            file_path: filePath,
-            file_url: publicUrlData.publicUrl,
-            uploaded_by: session.user.id,
+            user_id: session.user.id,
+            department_id: Number(departmentId),
+            category_id: Number(categoryId),
+            expense_date: expenseDate,
+            vendor_name: vendorName || null,
+            description,
+            amount: Number(amount),
+            currency_code: currencyCode,
+            payment_type: paymentType,
+            status: "submitted",
           },
         ])
+        .select()
+        .single()
+
+      if (expenseError || !insertedExpense) {
+        setMessage("Masraf kaydı sırasında hata oluştu.")
+        return
       }
+
+      if (selectedFile) {
+        const safeFileName = selectedFile.name.replace(/\s+/g, "_")
+        const filePath = `expenses/${insertedExpense.id}/${Date.now()}_${safeFileName}`
+
+        const { error: uploadError } = await supabase.storage
+          .from("expense-files")
+          .upload(filePath, selectedFile, {
+            cacheControl: "3600",
+            upsert: false,
+            contentType: selectedFile.type,
+          })
+
+        if (!uploadError) {
+          const { data: publicUrlData } = supabase.storage
+            .from("expense-files")
+            .getPublicUrl(filePath)
+
+          await supabase.from("expense_files").insert([
+            {
+              expense_id: insertedExpense.id,
+              file_name: selectedFile.name,
+              file_path: filePath,
+              file_url: publicUrlData.publicUrl,
+              uploaded_by: session.user.id,
+            },
+          ])
+        }
+      }
+
+      await supabase.from("expense_status_logs").insert([
+        {
+          expense_id: insertedExpense.id,
+          action_by: session.user.id,
+          old_status: null,
+          new_status: "submitted",
+          note: "Masraf kaydı oluşturuldu",
+        },
+      ])
+
+      setVendorName("")
+      setDescription("")
+      setAmount("")
+      setCurrencyCode("TRY")
+      setPaymentType("personal_card")
+      setExpenseDate("")
+      setSelectedFile(null)
+
+      const fileInput = document.getElementById("expense-file") as HTMLInputElement | null
+      if (fileInput) fileInput.value = ""
+
+      setMessage("Masraf kaydı başarıyla eklendi.")
+      await fetchExpenses(session.user.id, profile)
+    } finally {
+      setLoading(false)
     }
-
-    await supabase.from("expense_status_logs").insert([
-      {
-        expense_id: insertedExpense.id,
-        action_by: session.user.id,
-        old_status: null,
-        new_status: "submitted",
-        note: "Masraf kaydı oluşturuldu",
-      },
-    ])
-
-    setLoading(false)
-    setMessage("Masraf kaydı başarıyla eklendi.")
-
-    setVendorName("")
-    setDescription("")
-    setAmount("")
-    setCurrencyCode("TRY")
-    setPaymentType("personal_card")
-    setExpenseDate("")
-    setSelectedFile(null)
-
-    const fileInput = document.getElementById("expense-file") as HTMLInputElement | null
-    if (fileInput) fileInput.value = ""
-
-    fetchExpenses()
   }
 
   async function updateExpenseStatus(
@@ -388,30 +447,24 @@ export default function Home() {
         .eq("id", expenseId)
 
       if (updateError) {
-        throw new Error("Masraf güncellenemedi: " + updateError.message)
+        throw new Error("Masraf güncellenemedi.")
       }
 
-      const { error: logError } = await supabase
-        .from("expense_status_logs")
-        .insert([
-          {
-            expense_id: expenseId,
-            action_by: session.user.id,
-            old_status: oldStatus,
-            new_status: newStatus,
-            note: newStatus === "approved" ? "Kayıt onaylandı" : "Kayıt reddedildi",
-          },
-        ])
-
-      if (logError) {
-        throw new Error("Log kaydı yazılamadı: " + logError.message)
-      }
+      await supabase.from("expense_status_logs").insert([
+        {
+          expense_id: expenseId,
+          action_by: session.user.id,
+          old_status: oldStatus,
+          new_status: newStatus,
+          note: newStatus === "approved" ? "Kayıt onaylandı" : "Kayıt reddedildi",
+        },
+      ])
 
       setMessage(newStatus === "approved" ? "Masraf onaylandı." : "Masraf reddedildi.")
       await fetchExpenses()
     } catch (err: any) {
-      console.error("Durum güncelleme hatası:", err)
-      setMessage(err?.message || "İşlem sırasında hata oluştu.")
+      console.error("Status update error:", err)
+      setMessage("İşlem sırasında hata oluştu.")
     } finally {
       setActionLoadingId(null)
     }
@@ -503,14 +556,23 @@ export default function Home() {
     if (roleId === 1) return "Personel"
     if (roleId === 2) return "Muhasebe"
     if (roleId === 3) return "Yönetici"
+    if (roleId === 4) return "Admin"
     return "-"
   }
 
-  if (!session) {
+  if (!authReady) {
     return (
       <div style={pageStyle}>
         <TopHeader />
+        <div style={loginCardStyle}>Yükleniyor...</div>
+      </div>
+    )
+  }
 
+  if (!session || !profile) {
+    return (
+      <div style={pageStyle}>
+        <TopHeader />
         <div style={loginCardStyle}>
           <h2 style={sectionTitleStyle}>Giriş Yap</h2>
 
@@ -571,7 +633,7 @@ export default function Home() {
         </div>
       )}
 
-      {(isMuhasebe || isYonetici) && (
+      {canSeeAllExpenses && (
         <div style={dashboardGridStyle}>
           <div style={dashboardCardStyle}>
             <div style={dashboardTitleStyle}>Toplam Kayıt</div>
@@ -738,7 +800,7 @@ export default function Home() {
         <div style={cardStyle}>
           <div style={listHeaderStyle}>
             <h2 style={sectionTitleStyle}>
-              {isPersonel ? "Masraflarım" : isMuhasebe ? "Masraflar" : "Tüm Masraflar"}
+              {isPersonel ? "Masraflarım" : "Masraflar"}
             </h2>
 
             <button type="button" onClick={exportExcel} style={secondaryButtonStyle}>
@@ -1088,6 +1150,7 @@ const messageBoxStyle: React.CSSProperties = {
   borderRadius: "10px",
   background: "#e2e8f0",
   color: "#0f172a",
+  marginTop: "16px",
 }
 
 const expenseCardStyle: React.CSSProperties = {
