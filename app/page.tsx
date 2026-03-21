@@ -1,41 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import Image from "next/image"
-import * as XLSX from "xlsx"
+import { useEffect, useState } from "react"
 import { supabase } from "../lib/supabaseClient"
-
-type Department = {
-  id: number
-  name: string
-}
-
-type Category = {
-  id: number
-  name: string
-}
-
-type ExpenseFile = {
-  file_url: string | null
-  file_name: string
-}
-
-type Expense = {
-  id: number
-  expense_no: string
-  expense_date: string
-  vendor_name: string | null
-  description: string
-  amount: number
-  currency_code: string
-  payment_type: string
-  status: string
-  created_at: string
-  user_id: string
-  departments: { name: string }[] | null
-  categories: { name: string }[] | null
-  expense_files: ExpenseFile[] | null
-}
 
 type Profile = {
   id: string
@@ -45,69 +11,41 @@ type Profile = {
   role_id: number | null
 }
 
-export default function Home() {
-  const [authReady, setAuthReady] = useState(false)
-  const [session, setSession] = useState<any>(null)
+export default function Page() {
+  const [booting, setBooting] = useState(true)
+  const [user, setUser] = useState<any>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
 
   const [email, setEmail] = useState("test@ozeniplik.com")
   const [password, setPassword] = useState("123456")
+  const [message, setMessage] = useState("")
+  const [loading, setLoading] = useState(false)
 
-  const [departments, setDepartments] = useState<Department[]>([])
-  const [categories, setCategories] = useState<Category[]>([])
-  const [expenses, setExpenses] = useState<Expense[]>([])
-
-  const [departmentId, setDepartmentId] = useState("")
-  const [categoryId, setCategoryId] = useState("")
   const [expenseDate, setExpenseDate] = useState("")
   const [vendorName, setVendorName] = useState("")
   const [description, setDescription] = useState("")
   const [amount, setAmount] = useState("")
-  const [currencyCode, setCurrencyCode] = useState("TRY")
-  const [paymentType, setPaymentType] = useState("personal_card")
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
-
-  const [searchText, setSearchText] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
-  const [dateFrom, setDateFrom] = useState("")
-  const [dateTo, setDateTo] = useState("")
-
-  const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState("")
-  const [actionLoadingId, setActionLoadingId] = useState<number | null>(null)
-
-  const isPersonel = profile?.role_id === 1
-  const isMuhasebe = profile?.role_id === 2
-  const isYonetici = profile?.role_id === 3
-  const isAdmin = profile?.role_id === 4
-
-  const canApproveReject = isMuhasebe || isAdmin
-  const canSeeAllExpenses = isMuhasebe || isYonetici || isAdmin
+  const [expenses, setExpenses] = useState<any[]>([])
 
   useEffect(() => {
-    let active = true
-
-    const timeout = setTimeout(() => {
-      if (active) setAuthReady(true)
-    }, 3000)
+    let mounted = true
 
     async function init() {
       try {
-        const {
-          data: { session: currentSession },
-        } = await supabase.auth.getSession()
+        const { data } = await supabase.auth.getUser()
+        const currentUser = data.user ?? null
 
-        if (!active) return
+        if (!mounted) return
 
-        setSession(currentSession)
-
-        if (currentSession?.user?.id) {
-          await loadProfileAndData(currentSession.user.id)
+        if (currentUser) {
+          setUser(currentUser)
+          await loadProfile(currentUser.id)
+          await loadExpenses(currentUser.id)
         }
       } catch (err) {
-        console.error("Init error:", err)
+        console.error(err)
       } finally {
-        if (active) setAuthReady(true)
+        if (mounted) setBooting(false)
       }
     }
 
@@ -115,408 +53,61 @@ export default function Home() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, currentSession) => {
-      if (!active) return
-      setSession(currentSession)
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const currentUser = session?.user ?? null
 
-      if (!currentSession?.user?.id) {
+      if (!mounted) return
+
+      if (currentUser) {
+        setUser(currentUser)
+        await loadProfile(currentUser.id)
+        await loadExpenses(currentUser.id)
+      } else {
+        setUser(null)
         setProfile(null)
         setExpenses([])
-      } else {
-        loadProfileAndData(currentSession.user.id)
       }
 
-      setAuthReady(true)
+      setBooting(false)
     })
 
     return () => {
-      active = false
-      clearTimeout(timeout)
+      mounted = false
       subscription.unsubscribe()
     }
   }, [])
 
-  useEffect(() => {
-    if (isMuhasebe || isAdmin) {
-      setStatusFilter("pending")
-    } else {
-      setStatusFilter("all")
-    }
-  }, [isMuhasebe, isAdmin])
-
-  async function loadProfileAndData(userId: string) {
-    const profileData = await fetchProfile(userId)
-    await fetchInitialData(profileData)
-    if (profileData) {
-      await fetchExpenses(userId, profileData)
-    }
-  }
-
-  async function fetchProfile(userId: string): Promise<Profile | null> {
+  async function loadProfile(userId: string) {
     const { data, error } = await supabase
       .from("profiles")
       .select("id, full_name, email, department_id, role_id")
       .eq("id", userId)
-      .maybeSingle()
+      .single()
 
     if (error) {
       console.error("Profile error:", error)
       setProfile(null)
       setMessage("Profil alınamadı.")
-      return null
-    }
-
-    if (!data) {
-      setProfile(null)
-      setMessage("Profil bulunamadı.")
-      return null
+      return
     }
 
     setProfile(data)
-    if (data.department_id) {
-      setDepartmentId(String(data.department_id))
-    }
-
-    return data as Profile
   }
 
-  async function fetchInitialData(currentProfile?: Profile | null) {
-    const { data: depData } = await supabase
-      .from("departments")
-      .select("id, name")
-      .eq("is_active", true)
-      .order("id", { ascending: true })
-
-    const { data: catData } = await supabase
-      .from("categories")
-      .select("id, name")
-      .eq("is_active", true)
-      .order("id", { ascending: true })
-
-    const deps = depData || []
-    const cats = catData || []
-
-    setDepartments(deps)
-    setCategories(cats)
-
-    if (currentProfile?.department_id) {
-      setDepartmentId(String(currentProfile.department_id))
-    } else if (deps.length > 0 && !departmentId) {
-      setDepartmentId(String(deps[0].id))
-    }
-
-    if (cats.length > 0 && !categoryId) {
-      setCategoryId(String(cats[0].id))
-    }
-  }
-
-  async function fetchExpenses(userIdParam?: string, profileParam?: Profile | null) {
-    const uid = userIdParam || session?.user?.id
-    const p = profileParam || profile
-
-    if (!uid || !p) return
-
-    let query = supabase
+  async function loadExpenses(userId: string) {
+    const { data, error } = await supabase
       .from("expenses")
-      .select(`
-        id,
-        expense_no,
-        expense_date,
-        vendor_name,
-        description,
-        amount,
-        currency_code,
-        payment_type,
-        status,
-        created_at,
-        user_id,
-        departments(name),
-        categories(name),
-        expense_files(file_url, file_name)
-      `)
+      .select("*")
+      .eq("user_id", userId)
       .order("created_at", { ascending: false })
-      .limit(500)
-
-    if (!(p.role_id === 2 || p.role_id === 3 || p.role_id === 4)) {
-      query = query.eq("user_id", uid)
-    }
-
-    const { data, error } = await query
 
     if (error) {
       console.error("Expense error:", error)
-      setMessage("Masraflar alınamadı.")
       return
     }
 
-    setExpenses((data as unknown as Expense[]) || [])
+    setExpenses(data || [])
   }
-
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault()
-    setMessage("")
-    setLoading(true)
-
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      })
-
-      if (error) {
-        setMessage("Giriş hatası: " + error.message)
-        return
-      }
-
-      if (!data.user || !data.session) {
-        setMessage("Oturum alınamadı.")
-        return
-      }
-
-      setSession(data.session)
-      await loadProfileAndData(data.user.id)
-      setMessage("Giriş başarılı.")
-    } catch (err) {
-      console.error("Login error:", err)
-      setMessage("Giriş sırasında hata oluştu.")
-    } finally {
-      setLoading(false)
-      setAuthReady(true)
-    }
-  }
-
-  async function handleLogout() {
-    setLoading(true)
-    setMessage("")
-
-    try {
-      const { error } = await supabase.auth.signOut()
-      if (error) {
-        setMessage("Çıkış yapılamadı.")
-        return
-      }
-
-      setSession(null)
-      setProfile(null)
-      setExpenses([])
-      setMessage("Çıkış yapıldı.")
-    } catch (err) {
-      console.error("Logout error:", err)
-      setMessage("Çıkış yapılamadı.")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setMessage("")
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (!user || !profile) {
-      setMessage("Önce giriş yapmalısınız.")
-      return
-    }
-
-    if (!departmentId || !categoryId || !expenseDate || !description || !amount) {
-      setMessage("Lütfen zorunlu alanları doldurun.")
-      return
-    }
-
-    setLoading(true)
-
-    try {
-      const { data: insertedExpense, error: expenseError } = await supabase
-        .from("expenses")
-        .insert([
-          {
-            user_id: user.id,
-            department_id: Number(departmentId),
-            category_id: Number(categoryId),
-            expense_date: expenseDate,
-            vendor_name: vendorName || null,
-            description,
-            amount: Number(amount),
-            currency_code: currencyCode,
-            payment_type: paymentType,
-            status: "submitted",
-          },
-        ])
-        .select()
-        .single()
-
-      if (expenseError || !insertedExpense) {
-        setMessage("Masraf kaydı sırasında hata oluştu.")
-        return
-      }
-
-      if (selectedFile) {
-        const safeFileName = selectedFile.name.replace(/\s+/g, "_")
-        const filePath = `expenses/${insertedExpense.id}/${Date.now()}_${safeFileName}`
-
-        const { error: uploadError } = await supabase.storage
-          .from("expense-files")
-          .upload(filePath, selectedFile, {
-            cacheControl: "3600",
-            upsert: false,
-            contentType: selectedFile.type,
-          })
-
-        if (!uploadError) {
-          const { data: publicUrlData } = supabase.storage
-            .from("expense-files")
-            .getPublicUrl(filePath)
-
-          await supabase.from("expense_files").insert([
-            {
-              expense_id: insertedExpense.id,
-              file_name: selectedFile.name,
-              file_path: filePath,
-              file_url: publicUrlData.publicUrl,
-              uploaded_by: user.id,
-            },
-          ])
-        }
-      }
-
-      await supabase.from("expense_status_logs").insert([
-        {
-          expense_id: insertedExpense.id,
-          action_by: user.id,
-          old_status: null,
-          new_status: "submitted",
-          note: "Masraf kaydı oluşturuldu",
-        },
-      ])
-
-      setVendorName("")
-      setDescription("")
-      setAmount("")
-      setCurrencyCode("TRY")
-      setPaymentType("personal_card")
-      setExpenseDate("")
-      setSelectedFile(null)
-
-      const fileInput = document.getElementById("expense-file") as HTMLInputElement | null
-      if (fileInput) fileInput.value = ""
-
-      setMessage("Masraf kaydı başarıyla eklendi.")
-      await fetchExpenses(user.id, profile)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function updateExpenseStatus(
-    expenseId: number,
-    oldStatus: string,
-    newStatus: "approved" | "rejected"
-  ) {
-    if (!session?.user?.id || !canApproveReject) {
-      setMessage("Bu işlem için yetkiniz yok.")
-      return
-    }
-
-    setActionLoadingId(expenseId)
-    setMessage("")
-
-    try {
-      const { error } = await supabase
-        .from("expenses")
-        .update({
-          status: newStatus,
-          approved_by: session.user.id,
-          approved_at: newStatus === "approved" ? new Date().toISOString() : null,
-          rejection_reason: newStatus === "rejected" ? "Muhasebe tarafından reddedildi" : null,
-        })
-        .eq("id", expenseId)
-
-      if (error) {
-        setMessage("Durum güncellenemedi.")
-        return
-      }
-
-      await supabase.from("expense_status_logs").insert([
-        {
-          expense_id: expenseId,
-          action_by: session.user.id,
-          old_status: oldStatus,
-          new_status: newStatus,
-          note: newStatus === "approved" ? "Kayıt onaylandı" : "Kayıt reddedildi",
-        },
-      ])
-
-      setMessage(newStatus === "approved" ? "Masraf onaylandı." : "Masraf reddedildi.")
-      await fetchExpenses()
-    } finally {
-      setActionLoadingId(null)
-    }
-  }
-
-  const filteredExpenses = useMemo(() => {
-    return expenses.filter((expense) => {
-      const search = searchText.trim().toLowerCase()
-
-      const matchesSearch =
-        !search ||
-        expense.expense_no?.toLowerCase().includes(search) ||
-        expense.description?.toLowerCase().includes(search) ||
-        expense.vendor_name?.toLowerCase().includes(search) ||
-        expense.departments?.[0]?.name?.toLowerCase().includes(search) ||
-        expense.categories?.[0]?.name?.toLowerCase().includes(search)
-
-      const matchesStatus =
-        statusFilter === "all"
-          ? true
-          : statusFilter === "pending"
-          ? expense.status === "submitted" || expense.status === "under_review"
-          : expense.status === statusFilter
-
-      const matchesDateFrom = !dateFrom || expense.expense_date >= dateFrom
-      const matchesDateTo = !dateTo || expense.expense_date <= dateTo
-
-      return matchesSearch && matchesStatus && matchesDateFrom && matchesDateTo
-    })
-  }, [expenses, searchText, statusFilter, dateFrom, dateTo])
-
-  function exportExcel() {
-    if (expenses.length === 0) {
-      setMessage("İndirilecek kayıt bulunamadı.")
-      return
-    }
-
-    const rows = expenses.map((e) => ({
-      MasrafNo: e.expense_no,
-      Tarih: e.expense_date,
-      Departman: e.departments?.[0]?.name || "",
-      Kategori: e.categories?.[0]?.name || "",
-      Tedarikci: e.vendor_name || "",
-      Aciklama: e.description || "",
-      Tutar: e.amount,
-      ParaBirimi: e.currency_code,
-      OdemeTipi: e.payment_type,
-      Durum: e.status,
-    }))
-
-    const ws = XLSX.utils.json_to_sheet(rows)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, "Masraflar")
-    XLSX.writeFile(wb, "masraf-raporu.xlsx")
-  }
-
-  const dashboard = useMemo(() => {
-    const totalCount = expenses.length
-    const pendingCount = expenses.filter(
-      (e) => e.status === "submitted" || e.status === "under_review"
-    ).length
-    const approvedCount = expenses.filter((e) => e.status === "approved").length
-    const rejectedCount = expenses.filter((e) => e.status === "rejected").length
-
-    return { totalCount, pendingCount, approvedCount, rejectedCount }
-  }, [expenses])
 
   function roleName(roleId?: number | null) {
     if (roleId === 1) return "Personel"
@@ -526,542 +117,220 @@ export default function Home() {
     return "-"
   }
 
-  if (!authReady) {
-    return (
-      <div style={pageStyle}>
-        <TopHeader />
-        <div style={loginCardStyle}>Yükleniyor...</div>
-      </div>
-    )
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault()
+    setLoading(true)
+    setMessage("")
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      })
+
+      if (error || !data.user) {
+        setMessage("Giriş hatası.")
+        return
+      }
+
+      setUser(data.user)
+      await loadProfile(data.user.id)
+      await loadExpenses(data.user.id)
+      setMessage("Giriş başarılı.")
+    } catch (err) {
+      console.error(err)
+      setMessage("Giriş sırasında hata oluştu.")
+    } finally {
+      setLoading(false)
+    }
   }
 
-  if (!session || !profile) {
-    return (
-      <div style={pageStyle}>
-        <TopHeader />
-        <div style={loginCardStyle}>
-          <h2 style={sectionTitleStyle}>Giriş Yap</h2>
+  async function handleLogout() {
+    setLoading(true)
+    setMessage("")
 
-          <form onSubmit={handleLogin}>
-            <div style={{ marginBottom: 14 }}>
-              <label style={labelStyle}>Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                style={inputStyle}
-              />
-            </div>
-
-            <div style={{ marginBottom: 16 }}>
-              <label style={labelStyle}>Şifre</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                style={inputStyle}
-              />
-            </div>
-
-            <button type="submit" disabled={loading} style={primaryButtonStyle}>
-              {loading ? "Giriş yapılıyor..." : "Giriş Yap"}
-            </button>
-          </form>
-
-          {message && <div style={messageBoxStyle}>{message}</div>}
-        </div>
-      </div>
-    )
+    try {
+      await supabase.auth.signOut()
+      setUser(null)
+      setProfile(null)
+      setExpenses([])
+      setMessage("Çıkış yapıldı.")
+    } catch (err) {
+      console.error(err)
+      setMessage("Çıkış yapılamadı.")
+    } finally {
+      setLoading(false)
+    }
   }
 
-  return (
-    <div style={pageStyle}>
-      <TopHeader />
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault()
+    setMessage("")
 
-      <div style={topBarStyle}>
-        <div>
-          <div style={welcomeTitleStyle}>
-            Hoş geldiniz{profile.full_name ? `, ${profile.full_name}` : ""}
-          </div>
-          <div style={welcomeSubStyle}>Rol: {roleName(profile.role_id)}</div>
-        </div>
+    if (!user || !profile) {
+      setMessage("Önce giriş yapmalısınız.")
+      return
+    }
 
-        <button onClick={handleLogout} style={logoutButtonStyle}>
-          Çıkış Yap
-        </button>
-      </div>
+    if (!expenseDate || !description || !amount) {
+      setMessage("Tarih, açıklama ve tutar zorunlu.")
+      return
+    }
 
-      {message && <div style={{ ...messageBoxStyle, marginBottom: 18 }}>{message}</div>}
+    setLoading(true)
 
-      {canSeeAllExpenses && (
-        <div style={dashboardGridStyle}>
-          <div style={dashboardCardStyle}>
-            <div style={dashboardTitleStyle}>Toplam</div>
-            <div style={dashboardValueStyle}>{dashboard.totalCount}</div>
-          </div>
-          <div style={dashboardCardStyle}>
-            <div style={dashboardTitleStyle}>Bekleyen</div>
-            <div style={dashboardValueStyle}>{dashboard.pendingCount}</div>
-          </div>
-          <div style={dashboardCardStyle}>
-            <div style={dashboardTitleStyle}>Onaylanan</div>
-            <div style={dashboardValueStyle}>{dashboard.approvedCount}</div>
-          </div>
-          <div style={dashboardCardStyle}>
-            <div style={dashboardTitleStyle}>Reddedilen</div>
-            <div style={dashboardValueStyle}>{dashboard.rejectedCount}</div>
-          </div>
-        </div>
-      )}
+    try {
+      const { error } = await supabase.from("expenses").insert([
+        {
+          user_id: user.id,
+          expense_date: expenseDate,
+          vendor_name: vendorName || null,
+          description,
+          amount: Number(amount),
+          currency_code: "TRY",
+          payment_type: "personal_card",
+          status: "submitted",
+          department_id: profile.department_id || 1,
+          category_id: 1,
+        },
+      ])
 
-      <div style={mainGridStyle}>
-        <div style={cardStyle}>
-          <h2 style={sectionTitleStyle}>Yeni Masraf</h2>
+      if (error) {
+        console.error(error)
+        setMessage("Masraf kaydedilemedi.")
+        return
+      }
 
-          <form onSubmit={handleSubmit}>
-            <div style={{ marginBottom: 14 }}>
-              <label style={labelStyle}>Departman</label>
-              <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} style={inputStyle}>
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+      setExpenseDate("")
+      setVendorName("")
+      setDescription("")
+      setAmount("")
+      setMessage("Masraf kaydedildi.")
+      await loadExpenses(user.id)
+    } catch (err) {
+      console.error(err)
+      setMessage("Masraf kaydı sırasında hata oluştu.")
+    } finally {
+      setLoading(false)
+    }
+  }
 
-            <div style={{ marginBottom: 14 }}>
-              <label style={labelStyle}>Kategori</label>
-              <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} style={inputStyle}>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+  if (booting) {
+    return <div style={{ padding: 40, fontFamily: "Arial" }}>Yükleniyor...</div>
+  }
 
-            <div style={{ marginBottom: 14 }}>
-              <label style={labelStyle}>Harcama Tarihi</label>
-              <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} style={inputStyle} />
-            </div>
-
-            <div style={{ marginBottom: 14 }}>
-              <label style={labelStyle}>Tedarikçi / Firma</label>
-              <input value={vendorName} onChange={(e) => setVendorName(e.target.value)} style={inputStyle} />
-            </div>
-
-            <div style={{ marginBottom: 14 }}>
-              <label style={labelStyle}>Açıklama</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={4}
-                style={{ ...inputStyle, resize: "vertical", minHeight: 120 }}
-              />
-            </div>
-
-            <div style={twoColGridStyle}>
-              <div>
-                <label style={labelStyle}>Tutar</label>
-                <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} style={inputStyle} />
-              </div>
-
-              <div>
-                <label style={labelStyle}>Para Birimi</label>
-                <select value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value)} style={inputStyle}>
-                  <option value="TRY">TRY</option>
-                  <option value="USD">USD</option>
-                  <option value="EUR">EUR</option>
-                </select>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 14 }}>
-              <label style={labelStyle}>Ödeme Tipi</label>
-              <select value={paymentType} onChange={(e) => setPaymentType(e.target.value)} style={inputStyle}>
-                <option value="cash">Nakit</option>
-                <option value="company_card">Şirket Kartı</option>
-                <option value="personal_card">Kişisel Kart</option>
-                <option value="bank_transfer">Havale / EFT</option>
-              </select>
-            </div>
-
-            <div style={{ marginBottom: 20 }}>
-              <label style={labelStyle}>Fiş / Fatura</label>
-              <input
-                id="expense-file"
-                type="file"
-                accept="image/*,.pdf"
-                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                style={inputStyle}
-              />
-            </div>
-
-            <button type="submit" disabled={loading} style={primaryButtonStyle}>
-              {loading ? "Kaydediliyor..." : "Kaydet"}
-            </button>
-          </form>
-        </div>
-
-        <div style={cardStyle}>
-          <div style={listHeaderStyle}>
-            <h2 style={sectionTitleStyle}>{isPersonel ? "Masraflarım" : "Masraflar"}</h2>
-            <button onClick={exportExcel} style={secondaryButtonStyle}>
-              Excel İndir
-            </button>
-          </div>
-
-          <div style={filterGridStyle}>
+  if (!user || !profile) {
+    return (
+      <div style={{ maxWidth: 420, margin: "60px auto", fontFamily: "Arial" }}>
+        <h1>MASRAF SİSTEMİ</h1>
+        <form onSubmit={handleLogin}>
+          <div style={{ marginBottom: 12 }}>
+            <label>Email</label>
             <input
-              type="text"
-              placeholder="Masraf no, açıklama, firma ara"
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              style={inputStyle}
+              style={{ width: "100%", padding: 12, marginTop: 6 }}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
             />
-
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={inputStyle}>
-              <option value="all">Tüm durumlar</option>
-              <option value="pending">Bekleyenler</option>
-              <option value="submitted">Submitted</option>
-              <option value="under_review">Under Review</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-            </select>
-
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={inputStyle} />
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inputStyle} />
           </div>
 
-          {filteredExpenses.length === 0 ? (
-            <p style={{ color: "#64748b" }}>Kayıt yok.</p>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {filteredExpenses.map((expense) => (
-                <div key={expense.id} style={expenseCardStyle}>
-                  <div style={expenseTopRowStyle}>
-                    <strong style={{ fontSize: 18 }}>{expense.expense_no}</strong>
-                    <span style={{ fontWeight: 700 }}>
-                      {expense.amount} {expense.currency_code}
-                    </span>
-                  </div>
+          <div style={{ marginBottom: 12 }}>
+            <label>Şifre</label>
+            <input
+              type="password"
+              style={{ width: "100%", padding: 12, marginTop: 6 }}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
 
-                  <div style={{ marginTop: 8, color: "#334155" }}>{expense.description}</div>
+          <button type="submit" disabled={loading} style={{ padding: "12px 18px" }}>
+            {loading ? "Giriş yapılıyor..." : "Giriş Yap"}
+          </button>
+        </form>
 
-                  <div style={expenseInfoStyle}>
-                    <div>Tarih: {expense.expense_date}</div>
-                    <div>Departman: {expense.departments?.[0]?.name || "-"}</div>
-                    <div>Kategori: {expense.categories?.[0]?.name || "-"}</div>
-                    <div>Tedarikçi: {expense.vendor_name || "-"}</div>
-                    <div>Ödeme Tipi: {expense.payment_type}</div>
-                    <div>Durum: {expense.status}</div>
-                  </div>
-
-                  {expense.expense_files?.[0]?.file_url && (
-                    <div style={{ marginTop: 10 }}>
-                      <a href={expense.expense_files[0].file_url} target="_blank" rel="noreferrer" style={fileLinkStyle}>
-                        Fiş / Fatura Aç
-                      </a>
-                    </div>
-                  )}
-
-                  {canApproveReject &&
-                    (expense.status === "submitted" || expense.status === "under_review") && (
-                      <div style={actionRowStyle}>
-                        <button
-                          type="button"
-                          disabled={actionLoadingId === expense.id}
-                          onClick={() => updateExpenseStatus(expense.id, expense.status, "approved")}
-                          style={greenButtonStyle}
-                        >
-                          {actionLoadingId === expense.id ? "İşleniyor..." : "Onayla"}
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={actionLoadingId === expense.id}
-                          onClick={() => updateExpenseStatus(expense.id, expense.status, "rejected")}
-                          style={redButtonStyle}
-                        >
-                          {actionLoadingId === expense.id ? "İşleniyor..." : "Reddet"}
-                        </button>
-                      </div>
-                    )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {message && <div style={{ marginTop: 16 }}>{message}</div>}
       </div>
-    </div>
-  )
-}
+    )
+  }
 
-function TopHeader() {
   return (
-    <div style={headerWrapStyle}>
-      <div style={headerInnerStyle}>
-        <Image
-          src="/logo.png"
-          alt="Özen İplik"
-          width={260}
-          height={140}
-          style={{
-            objectFit: "contain",
-            width: "100%",
-            height: "auto",
-            maxWidth: "260px",
-          }}
-          priority
-        />
-        <div style={headerTitleStyle}>MASRAF SİSTEMİ</div>
+    <div style={{ maxWidth: 900, margin: "40px auto", fontFamily: "Arial" }}>
+      <h1>MASRAF SİSTEMİ</h1>
+
+      <div style={{ marginBottom: 20 }}>
+        <strong>Hoş geldiniz:</strong> {profile.full_name}
+        <br />
+        <strong>Rol:</strong> {roleName(profile.role_id)}
       </div>
+
+      <button onClick={handleLogout} disabled={loading} style={{ marginBottom: 24 }}>
+        Çıkış Yap
+      </button>
+
+      <form onSubmit={handleSave} style={{ border: "1px solid #ddd", padding: 16, marginBottom: 24 }}>
+        <h3>Yeni Masraf</h3>
+
+        <div style={{ marginBottom: 12 }}>
+          <label>Tarih</label>
+          <input
+            type="date"
+            style={{ width: "100%", padding: 12, marginTop: 6 }}
+            value={expenseDate}
+            onChange={(e) => setExpenseDate(e.target.value)}
+          />
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <label>Firma</label>
+          <input
+            style={{ width: "100%", padding: 12, marginTop: 6 }}
+            value={vendorName}
+            onChange={(e) => setVendorName(e.target.value)}
+          />
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <label>Açıklama</label>
+          <textarea
+            style={{ width: "100%", padding: 12, marginTop: 6, minHeight: 100 }}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <label>Tutar</label>
+          <input
+            type="number"
+            style={{ width: "100%", padding: 12, marginTop: 6 }}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </div>
+
+        <button type="submit" disabled={loading}>
+          {loading ? "Kaydediliyor..." : "Kaydet"}
+        </button>
+      </form>
+
+      <div style={{ border: "1px solid #ddd", padding: 16 }}>
+        <h3>Masraflarım</h3>
+
+        {expenses.length === 0 ? (
+          <div>Kayıt yok.</div>
+        ) : (
+          expenses.map((item) => (
+            <div key={item.id} style={{ borderBottom: "1px solid #eee", padding: "10px 0" }}>
+              <div><strong>{item.description}</strong></div>
+              <div>{item.expense_date}</div>
+              <div>{item.amount} TRY</div>
+              <div>{item.status}</div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {message && <div style={{ marginTop: 16 }}>{message}</div>}
     </div>
   )
-}
-
-const pageStyle: React.CSSProperties = {
-  minHeight: "100vh",
-  background: "#f8fafc",
-  padding: "16px",
-  fontFamily: "Arial, sans-serif",
-}
-
-const headerWrapStyle: React.CSSProperties = {
-  marginBottom: "22px",
-  borderBottom: "4px solid #0f172a",
-  paddingBottom: "14px",
-}
-
-const headerInnerStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  justifyContent: "center",
-  textAlign: "center",
-  gap: "10px",
-}
-
-const headerTitleStyle: React.CSSProperties = {
-  fontSize: "clamp(20px, 3vw, 28px)",
-  fontWeight: 700,
-  letterSpacing: "1px",
-  color: "#0f172a",
-}
-
-const topBarStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: "12px",
-  flexWrap: "wrap",
-  marginBottom: "18px",
-}
-
-const welcomeTitleStyle: React.CSSProperties = {
-  fontWeight: 700,
-  fontSize: "18px",
-  color: "#0f172a",
-}
-
-const welcomeSubStyle: React.CSSProperties = {
-  color: "#64748b",
-  marginTop: "4px",
-}
-
-const mainGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
-  gap: "24px",
-  alignItems: "start",
-}
-
-const dashboardGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: "16px",
-  marginTop: "8px",
-  marginBottom: "24px",
-}
-
-const filterGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: "12px",
-  marginBottom: "16px",
-}
-
-const twoColGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-  gap: "16px",
-  marginBottom: "16px",
-}
-
-const cardStyle: React.CSSProperties = {
-  background: "#ffffff",
-  borderRadius: "18px",
-  padding: "24px",
-  boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
-  overflow: "hidden",
-}
-
-const loginCardStyle: React.CSSProperties = {
-  maxWidth: "440px",
-  margin: "50px auto 0 auto",
-  background: "#ffffff",
-  borderRadius: "18px",
-  padding: "24px",
-  boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
-}
-
-const dashboardCardStyle: React.CSSProperties = {
-  background: "#ffffff",
-  borderRadius: "16px",
-  padding: "18px",
-  boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
-}
-
-const dashboardTitleStyle: React.CSSProperties = {
-  fontSize: "14px",
-  color: "#64748b",
-  marginBottom: "8px",
-}
-
-const dashboardValueStyle: React.CSSProperties = {
-  fontSize: "28px",
-  fontWeight: 700,
-  color: "#0f172a",
-}
-
-const sectionTitleStyle: React.CSSProperties = {
-  marginTop: 0,
-  marginBottom: "18px",
-  fontSize: "26px",
-  color: "#0f172a",
-}
-
-const listHeaderStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: "12px",
-  flexWrap: "wrap",
-  marginBottom: "16px",
-}
-
-const labelStyle: React.CSSProperties = {
-  display: "block",
-  marginBottom: "7px",
-  fontWeight: 700,
-  color: "#0f172a",
-  fontSize: "14px",
-}
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "14px 14px",
-  borderRadius: "12px",
-  border: "1px solid #cbd5e1",
-  boxSizing: "border-box",
-  fontSize: "15px",
-  minWidth: 0,
-  background: "#fff",
-  color: "#0f172a",
-}
-
-const primaryButtonStyle: React.CSSProperties = {
-  background: "#0f172a",
-  color: "#fff",
-  border: "none",
-  borderRadius: "12px",
-  padding: "14px 18px",
-  cursor: "pointer",
-  fontWeight: 700,
-  width: "100%",
-  fontSize: "16px",
-}
-
-const secondaryButtonStyle: React.CSSProperties = {
-  background: "#e2e8f0",
-  color: "#0f172a",
-  border: "none",
-  borderRadius: "10px",
-  padding: "10px 16px",
-  cursor: "pointer",
-  fontWeight: 600,
-}
-
-const logoutButtonStyle: React.CSSProperties = {
-  background: "#0f172a",
-  color: "#fff",
-  border: "none",
-  borderRadius: "12px",
-  padding: "12px 18px",
-  cursor: "pointer",
-  fontWeight: 700,
-}
-
-const greenButtonStyle: React.CSSProperties = {
-  background: "#16a34a",
-  color: "#fff",
-  border: "none",
-  borderRadius: "10px",
-  padding: "10px 14px",
-  cursor: "pointer",
-  fontWeight: 600,
-}
-
-const redButtonStyle: React.CSSProperties = {
-  background: "#dc2626",
-  color: "#fff",
-  border: "none",
-  borderRadius: "10px",
-  padding: "10px 14px",
-  cursor: "pointer",
-  fontWeight: 600,
-}
-
-const messageBoxStyle: React.CSSProperties = {
-  padding: "12px",
-  borderRadius: "10px",
-  background: "#e2e8f0",
-  color: "#0f172a",
-  marginTop: "16px",
-}
-
-const expenseCardStyle: React.CSSProperties = {
-  border: "1px solid #e2e8f0",
-  borderRadius: "14px",
-  padding: "16px",
-  background: "#f8fafc",
-}
-
-const expenseTopRowStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: "12px",
-  flexWrap: "wrap",
-}
-
-const expenseInfoStyle: React.CSSProperties = {
-  marginTop: "10px",
-  fontSize: "14px",
-  color: "#64748b",
-  lineHeight: 1.7,
-}
-
-const fileLinkStyle: React.CSSProperties = {
-  color: "#2563eb",
-  textDecoration: "none",
-  fontWeight: 600,
-}
-
-const actionRowStyle: React.CSSProperties = {
-  display: "flex",
-  gap: "10px",
-  marginTop: "14px",
-  flexWrap: "wrap",
 }
