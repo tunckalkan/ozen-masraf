@@ -1,592 +1,732 @@
-"use client"
+﻿"use client"
 
 import { useEffect, useState } from "react"
 import Image from "next/image"
 import { supabase } from "../lib/supabaseClient"
 
 type Profile = {
-  id: string
-  full_name: string
-  email: string | null
-  department_id: number | null
-  role_id: number | null
+ id: string
+ full_name: string
+ email: string | null
+ department_id: number | null
+ role_id: number | null
 }
 
 type Expense = {
-  id: number
-  expense_date: string
-  vendor_name: string | null
-  description: string
-  amount: number
-  status: string
-  created_at: string
+ id: number
+ user_id: string
+ expense_date: string
+ vendor_name: string | null
+ description: string
+ amount: number
+ status: string
+ created_at: string
 }
 
 export default function Page() {
-  const [booting, setBooting] = useState(true)
-  const [user, setUser] = useState<any>(null)
-  const [profile, setProfile] = useState<Profile | null>(null)
+ const [booting, setBooting] = useState(true)
+ const [user, setUser] = useState<any>(null)
+ const [profile, setProfile] = useState<Profile | null>(null)
 
-  const [email, setEmail] = useState("test@ozeniplik.com")
-  const [password, setPassword] = useState("123456")
+ const [email, setEmail] = useState("test@ozeniplik.com")
+ const [password, setPassword] = useState("123456")
 
-  const [expenseDate, setExpenseDate] = useState("")
-  const [vendorName, setVendorName] = useState("")
-  const [description, setDescription] = useState("")
-  const [amount, setAmount] = useState("")
+ const [expenseDate, setExpenseDate] = useState("")
+ const [vendorName, setVendorName] = useState("")
+ const [description, setDescription] = useState("")
+ const [amount, setAmount] = useState("")
 
-  const [expenses, setExpenses] = useState<Expense[]>([])
-  const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState("")
+ const [expenses, setExpenses] = useState<Expense[]>([])
+ const [loading, setLoading] = useState(false)
+ const [message, setMessage] = useState("")
+ const [actionLoadingId, setActionLoadingId] = useState<number | null>(null)
 
-  useEffect(() => {
-    let mounted = true
+ const isMuhasebe = profile?.role_id === 2
 
-    async function init() {
-      try {
-        const {
-          data: { user: currentUser },
-        } = await supabase.auth.getUser()
+ useEffect(() => {
+   let mounted = true
 
-        if (!mounted) return
+   async function init() {
+     try {
+       const {
+         data: { user: currentUser },
+       } = await supabase.auth.getUser()
 
-        if (currentUser) {
-          setUser(currentUser)
-          await loadProfile(currentUser.id)
-          await loadExpenses(currentUser.id)
-        }
-      } catch (err) {
-        console.error("Init error:", err)
-      } finally {
-        if (mounted) setBooting(false)
-      }
-    }
+       if (!mounted) return
 
-    init()
+       if (currentUser) {
+         setUser(currentUser)
+         const loadedProfile = await loadProfile(currentUser.id)
+         if (loadedProfile) {
+           await loadExpenses(currentUser.id, loadedProfile)
+         }
+       }
+     } catch (err) {
+       console.error("Init error:", err)
+     } finally {
+       if (mounted) setBooting(false)
+     }
+   }
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const currentUser = session?.user ?? null
+   init()
 
-      if (!mounted) return
+   const {
+     data: { subscription },
+   } = supabase.auth.onAuthStateChange(async (_event, session) => {
+     const currentUser = session?.user ?? null
 
-      if (currentUser) {
-        setUser(currentUser)
-        await loadProfile(currentUser.id)
-        await loadExpenses(currentUser.id)
-      } else {
-        setUser(null)
-        setProfile(null)
-        setExpenses([])
-      }
+     if (!mounted) return
 
-      setBooting(false)
-    })
+     if (currentUser) {
+       setUser(currentUser)
+       const loadedProfile = await loadProfile(currentUser.id)
+       if (loadedProfile) {
+         await loadExpenses(currentUser.id, loadedProfile)
+       }
+     } else {
+       setUser(null)
+       setProfile(null)
+       setExpenses([])
+     }
 
-    return () => {
-      mounted = false
-      subscription.unsubscribe()
-    }
-  }, [])
+     setBooting(false)
+   })
 
-  async function loadProfile(userId: string) {
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id, full_name, email, department_id, role_id")
-      .eq("id", userId)
-      .maybeSingle()
+   return () => {
+     mounted = false
+     subscription.unsubscribe()
+   }
+ }, [])
 
-    if (error) {
-      console.error("Profile error:", error)
-      setProfile(null)
-      setMessage(
-        `Profil hatası: ${error.message} | code: ${error.code || "-"} | userId: ${userId}`
-      )
-      return
-    }
+ async function loadProfile(userId: string): Promise<Profile | null> {
+   const { data, error } = await supabase
+     .from("profiles")
+     .select("id, full_name, email, department_id, role_id")
+     .eq("id", userId)
+     .maybeSingle()
 
-    if (!data) {
-      setProfile(null)
-      setMessage(`Profil bulunamadı. userId: ${userId}`)
-      return
-    }
+   if (error) {
+     console.error("Profile error:", error)
+     setProfile(null)
+     setMessage(`Profil hatası: ${error.message}`)
+     return null
+   }
 
-    setProfile(data)
-  }
+   if (!data) {
+     setProfile(null)
+     setMessage("Profil bulunamadı.")
+     return null
+   }
 
-  async function loadExpenses(userId: string) {
-    const { data, error } = await supabase
-      .from("expenses")
-      .select("id, expense_date, vendor_name, description, amount, status, created_at")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
+   setProfile(data)
+   return data
+ }
 
-    if (error) {
-      console.error("Expenses error:", error)
-      return
-    }
+ async function loadExpenses(userId: string, currentProfile?: Profile | null) {
+   const activeProfile = currentProfile || profile
+   if (!activeProfile) return
 
-    setExpenses(data || [])
-  }
+   let query = supabase
+     .from("expenses")
+     .select("id, user_id, expense_date, vendor_name, description, amount, status, created_at")
+     .order("created_at", { ascending: false })
 
-  function roleName(roleId?: number | null) {
-    if (roleId === 1) return "Personel"
-    if (roleId === 2) return "Muhasebe"
-    if (roleId === 3) return "Yönetici"
-    if (roleId === 4) return "Admin"
-    return "-"
-  }
+   if (activeProfile.role_id !== 2) {
+     query = query.eq("user_id", userId)
+   }
 
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault()
-    setLoading(true)
-    setMessage("")
+   const { data, error } = await query
 
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      })
+   if (error) {
+     console.error("Expenses error:", error)
+     setMessage(`Masraflar alınamadı: ${error.message}`)
+     return
+   }
 
-      if (error || !data.user) {
-        setMessage(error ? `Giriş hatası: ${error.message}` : "Giriş hatası.")
-        return
-      }
+   setExpenses(data || [])
+ }
 
-      setUser(data.user)
-      await loadProfile(data.user.id)
-      await loadExpenses(data.user.id)
+ function roleName(roleId?: number | null) {
+   if (roleId === 1) return "Personel"
+   if (roleId === 2) return "Muhasebe"
+   if (roleId === 3) return "Yönetici"
+   if (roleId === 4) return "Admin"
+   return "-"
+ }
 
-      setMessage((prev) => (prev ? prev : "Giriş başarılı."))
-    } catch (err: any) {
-      console.error("Login error:", err)
-      setMessage(`Giriş sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
-    } finally {
-      setLoading(false)
-    }
-  }
+ async function handleLogin(e: React.FormEvent) {
+   e.preventDefault()
+   setLoading(true)
+   setMessage("")
 
-  async function handleLogout() {
-    setLoading(true)
-    setMessage("")
+   try {
+     const { data, error } = await supabase.auth.signInWithPassword({
+       email: email.trim(),
+       password,
+     })
 
-    try {
-      await supabase.auth.signOut()
-      setUser(null)
-      setProfile(null)
-      setExpenses([])
-      setMessage("Çıkış yapıldı.")
-    } catch (err) {
-      console.error("Logout error:", err)
-      setMessage("Çıkış yapılamadı.")
-    } finally {
-      setLoading(false)
-    }
-  }
+     if (error || !data.user) {
+       setMessage(error ? `Giriş hatası: ${error.message}` : "Giriş hatası.")
+       return
+     }
 
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault()
-    setMessage("")
+     setUser(data.user)
+     const loadedProfile = await loadProfile(data.user.id)
+     if (loadedProfile) {
+       await loadExpenses(data.user.id, loadedProfile)
+     }
 
-    if (!user || !profile) {
-      setMessage("Önce giriş yapmalısınız.")
-      return
-    }
+     setMessage("Giriş başarılı.")
+   } catch (err: any) {
+     console.error("Login error:", err)
+     setMessage(`Giriş sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
+   } finally {
+     setLoading(false)
+   }
+ }
 
-    if (!expenseDate || !description || !amount) {
-      setMessage("Tarih, açıklama ve tutar zorunlu.")
-      return
-    }
+ async function handleLogout() {
+   setLoading(true)
+   setMessage("")
 
-    setLoading(true)
+   try {
+     const { error } = await supabase.auth.signOut()
 
-    try {
-      const { error } = await supabase.from("expenses").insert([
-        {
-          user_id: user.id,
-          expense_date: expenseDate,
-          vendor_name: vendorName || null,
-          description,
-          amount: Number(amount),
-          currency_code: "TRY",
-          payment_type: "personal_card",
-          status: "submitted",
-          department_id: profile.department_id || 1,
-          category_id: 1,
-        },
-      ])
+     if (error) {
+       setMessage(`Çıkış yapılamadı: ${error.message}`)
+       return
+     }
 
-      if (error) {
-        console.error("Insert error:", error)
-        setMessage(`Masraf kaydedilemedi: ${error.message}`)
-        return
-      }
+     setUser(null)
+     setProfile(null)
+     setExpenses([])
+     setExpenseDate("")
+     setVendorName("")
+     setDescription("")
+     setAmount("")
+     setEmail("test@ozeniplik.com")
+     setPassword("123456")
+     setMessage("Çıkış yapıldı.")
+   } catch (err: any) {
+     console.error("Logout error:", err)
+     setMessage(`Çıkış yapılamadı: ${err?.message || "bilinmiyor"}`)
+   } finally {
+     setLoading(false)
+   }
+ }
 
-      setExpenseDate("")
-      setVendorName("")
-      setDescription("")
-      setAmount("")
-      setMessage("Masraf kaydedildi.")
-      await loadExpenses(user.id)
-    } catch (err: any) {
-      console.error("Save error:", err)
-      setMessage(`Masraf kaydı sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
-    } finally {
-      setLoading(false)
-    }
-  }
+ async function handleSave(e: React.FormEvent) {
+   e.preventDefault()
+   setMessage("")
 
-  if (booting) {
-    return (
-      <div style={pageStyle}>
-        <Header />
-        <div style={centerBoxStyle}>Yükleniyor...</div>
-      </div>
-    )
-  }
+   if (!user || !profile) {
+     setMessage("Önce giriş yapmalısınız.")
+     return
+   }
 
-  if (!user || !profile) {
-    return (
-      <div style={pageStyle}>
-        <Header />
+   if (!expenseDate || !description || !amount) {
+     setMessage("Tarih, açıklama ve tutar zorunlu.")
+     return
+   }
 
-        <div style={loginOuterStyle}>
-          <div style={loginBoxStyle}>
-            <h2 style={sectionTitleStyle}>Giriş Yap</h2>
+   setLoading(true)
 
-            <form onSubmit={handleLogin}>
-              <div style={fieldWrapStyle}>
-                <label style={labelStyle}>Email</label>
-                <input
-                  style={inputStyle}
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
+   try {
+     const { error } = await supabase.from("expenses").insert([
+       {
+         user_id: user.id,
+         expense_date: expenseDate,
+         vendor_name: vendorName || null,
+         description,
+         amount: Number(amount),
+         currency_code: "TRY",
+         payment_type: "personal_card",
+         status: "submitted",
+         department_id: profile.department_id || 1,
+         category_id: 1,
+       },
+     ])
 
-              <div style={fieldWrapStyle}>
-                <label style={labelStyle}>Şifre</label>
-                <input
-                  type="password"
-                  style={inputStyle}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
+     if (error) {
+       console.error("Insert error:", error)
+       setMessage(`Masraf kaydedilemedi: ${error.message}`)
+       return
+     }
 
-              <button type="submit" disabled={loading} style={primaryButtonStyle}>
-                {loading ? "Giriş yapılıyor..." : "Giriş Yap"}
-              </button>
-            </form>
+     setExpenseDate("")
+     setVendorName("")
+     setDescription("")
+     setAmount("")
+     setMessage("Masraf kaydedildi.")
+     await loadExpenses(user.id, profile)
+   } catch (err: any) {
+     console.error("Save error:", err)
+     setMessage(`Masraf kaydı sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
+   } finally {
+     setLoading(false)
+   }
+ }
 
-            {message && (
-              <div style={{ ...messageStyle, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                {message}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    )
-  }
+ async function handleApprove(expenseId: number) {
+   if (!user || !isMuhasebe) return
 
-  return (
-    <div style={pageStyle}>
-      <Header />
+   setActionLoadingId(expenseId)
+   setMessage("")
 
-      <div style={contentWrapStyle}>
-        <div style={topBarStyle}>
-          <div>
-            <div style={welcomeStyle}>Hoş geldiniz, {profile.full_name}</div>
-            <div style={roleStyle}>Rol: {roleName(profile.role_id)}</div>
-          </div>
+   try {
+     const { error } = await supabase
+       .from("expenses")
+       .update({
+         status: "approved",
+         approved_by: user.id,
+         approved_at: new Date().toISOString(),
+       })
+       .eq("id", expenseId)
 
-          <button onClick={handleLogout} disabled={loading} style={logoutButtonStyle}>
-            Çıkış Yap
-          </button>
-        </div>
+     if (error) {
+       setMessage(`Onay hatası: ${error.message}`)
+       return
+     }
 
-        <div style={gridStyle}>
-          <div style={cardStyle}>
-            <h2 style={sectionTitleStyle}>Yeni Masraf</h2>
+     setMessage("Masraf onaylandı.")
+     await loadExpenses(user.id, profile)
+   } catch (err: any) {
+     setMessage(`Onay sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
+   } finally {
+     setActionLoadingId(null)
+   }
+ }
 
-            <form onSubmit={handleSave}>
-              <div style={fieldWrapStyle}>
-                <label style={labelStyle}>Tarih</label>
-                <input
-                  type="date"
-                  style={inputStyle}
-                  value={expenseDate}
-                  onChange={(e) => setExpenseDate(e.target.value)}
-                />
-              </div>
+ async function handleReject(expenseId: number) {
+   if (!user || !isMuhasebe) return
 
-              <div style={fieldWrapStyle}>
-                <label style={labelStyle}>Firma</label>
-                <input
-                  style={inputStyle}
-                  value={vendorName}
-                  onChange={(e) => setVendorName(e.target.value)}
-                  placeholder="Firma adı girin"
-                />
-              </div>
+   setActionLoadingId(expenseId)
+   setMessage("")
 
-              <div style={fieldWrapStyle}>
-                <label style={labelStyle}>Açıklama</label>
-                <textarea
-                  style={textareaStyle}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Masraf açıklaması"
-                />
-              </div>
+   try {
+     const { error } = await supabase
+       .from("expenses")
+       .update({
+         status: "rejected",
+         approved_by: user.id,
+         approved_at: new Date().toISOString(),
+         rejection_reason: "Muhasebe tarafından reddedildi",
+       })
+       .eq("id", expenseId)
 
-              <div style={fieldWrapStyle}>
-                <label style={labelStyle}>Tutar</label>
-                <input
-                  type="number"
-                  style={inputStyle}
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0"
-                />
-              </div>
+     if (error) {
+       setMessage(`Red hatası: ${error.message}`)
+       return
+     }
 
-              <button type="submit" disabled={loading} style={primaryButtonStyle}>
-                {loading ? "Kaydediliyor..." : "Kaydet"}
-              </button>
-            </form>
-          </div>
+     setMessage("Masraf reddedildi.")
+     await loadExpenses(user.id, profile)
+   } catch (err: any) {
+     setMessage(`Red sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
+   } finally {
+     setActionLoadingId(null)
+   }
+ }
 
-          <div style={cardStyle}>
-            <h2 style={sectionTitleStyle}>Masraflarım</h2>
+ if (booting) {
+   return (
+     <div style={pageStyle}>
+       <Header />
+       <div style={centerBoxStyle}>Yükleniyor...</div>
+     </div>
+   )
+ }
 
-            {expenses.length === 0 ? (
-              <div style={emptyStyle}>Kayıt yok.</div>
-            ) : (
-              expenses.map((item) => (
-                <div key={item.id} style={expenseRowStyle}>
-                  <div style={expenseTitleStyle}>{item.description}</div>
-                  <div style={expenseMetaStyle}>Tarih: {item.expense_date}</div>
-                  <div style={expenseMetaStyle}>Firma: {item.vendor_name || "-"}</div>
-                  <div style={expenseMetaStyle}>Tutar: {item.amount} TRY</div>
-                  <div style={expenseMetaStyle}>Durum: {item.status}</div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+ if (!user || !profile) {
+   return (
+     <div style={pageStyle}>
+       <Header />
 
-        {message && (
-          <div style={{ ...messageStyle, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-            {message}
-          </div>
-        )}
-      </div>
-    </div>
-  )
+       <div style={loginOuterStyle}>
+         <div style={loginBoxStyle}>
+           <h2 style={sectionTitleStyle}>Giriş Yap</h2>
+
+           <form onSubmit={handleLogin}>
+             <div style={fieldWrapStyle}>
+               <label style={labelStyle}>Email</label>
+               <input
+                 style={inputStyle}
+                 value={email}
+                 onChange={(e) => setEmail(e.target.value)}
+               />
+             </div>
+
+             <div style={fieldWrapStyle}>
+               <label style={labelStyle}>Şifre</label>
+               <input
+                 type="password"
+                 style={inputStyle}
+                 value={password}
+                 onChange={(e) => setPassword(e.target.value)}
+               />
+             </div>
+
+             <button type="submit" disabled={loading} style={primaryButtonStyle}>
+               {loading ? "Giriş yapılıyor..." : "Giriş Yap"}
+             </button>
+           </form>
+
+           {message && (
+             <div style={{ ...messageStyle, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+               {message}
+             </div>
+           )}
+         </div>
+       </div>
+     </div>
+   )
+ }
+
+ return (
+   <div style={pageStyle}>
+     <Header />
+
+     <div style={contentWrapStyle}>
+       <div style={topBarStyle}>
+         <div>
+           <div style={welcomeStyle}>Hoş geldiniz, {profile.full_name}</div>
+           <div style={roleStyle}>Rol: {roleName(profile.role_id)}</div>
+         </div>
+
+         <button onClick={handleLogout} disabled={loading} style={logoutButtonStyle}>
+           Çıkış Yap
+         </button>
+       </div>
+
+       <div style={gridStyle}>
+         <div style={cardStyle}>
+           <h2 style={sectionTitleStyle}>Yeni Masraf</h2>
+
+           <form onSubmit={handleSave}>
+             <div style={fieldWrapStyle}>
+               <label style={labelStyle}>Tarih</label>
+               <input
+                 type="date"
+                 style={inputStyle}
+                 value={expenseDate}
+                 onChange={(e) => setExpenseDate(e.target.value)}
+               />
+             </div>
+
+             <div style={fieldWrapStyle}>
+               <label style={labelStyle}>Firma</label>
+               <input
+                 style={inputStyle}
+                 value={vendorName}
+                 onChange={(e) => setVendorName(e.target.value)}
+                 placeholder="Firma adı girin"
+               />
+             </div>
+
+             <div style={fieldWrapStyle}>
+               <label style={labelStyle}>Açıklama</label>
+               <textarea
+                 style={textareaStyle}
+                 value={description}
+                 onChange={(e) => setDescription(e.target.value)}
+                 placeholder="Masraf açıklaması"
+               />
+             </div>
+
+             <div style={fieldWrapStyle}>
+               <label style={labelStyle}>Tutar</label>
+               <input
+                 type="number"
+                 style={inputStyle}
+                 value={amount}
+                 onChange={(e) => setAmount(e.target.value)}
+                 placeholder="0"
+               />
+             </div>
+
+             <button type="submit" disabled={loading} style={primaryButtonStyle}>
+               {loading ? "Kaydediliyor..." : "Kaydet"}
+             </button>
+           </form>
+         </div>
+
+         <div style={cardStyle}>
+           <h2 style={sectionTitleStyle}>
+             {isMuhasebe ? "Tüm Masraflar" : "Masraflarım"}
+           </h2>
+
+           {expenses.length === 0 ? (
+             <div style={emptyStyle}>Kayıt yok.</div>
+           ) : (
+             expenses.map((item) => (
+               <div key={item.id} style={expenseRowStyle}>
+                 <div style={expenseTitleStyle}>{item.description}</div>
+                 <div style={expenseMetaStyle}>Tarih: {item.expense_date}</div>
+                 <div style={expenseMetaStyle}>Firma: {item.vendor_name || "-"}</div>
+                 <div style={expenseMetaStyle}>Tutar: {item.amount} TRY</div>
+                 <div style={expenseMetaStyle}>Durum: {item.status}</div>
+
+                 {isMuhasebe && item.status === "submitted" && (
+                   <div style={actionRowStyle}>
+                     <button
+                       onClick={() => handleApprove(item.id)}
+                       disabled={actionLoadingId === item.id}
+                       style={approveButtonStyle}
+
+                       {actionLoadingId === item.id ? "İşleniyor..." : "Onayla"}
+                     </button>
+
+                     <button
+                       onClick={() => handleReject(item.id)}
+                       disabled={actionLoadingId === item.id}
+                       style={rejectButtonStyle}
+
+                       {actionLoadingId === item.id ? "İşleniyor..." : "Reddet"}
+                     </button>
+                   </div>
+                 )}
+               </div>
+             ))
+           )}
+         </div>
+       </div>
+
+       {message && (
+         <div style={{ ...messageStyle, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+           {message}
+         </div>
+       )}
+     </div>
+   </div>
+ )
 }
 
 function Header() {
-  return (
-    <div style={headerWrapStyle}>
-      <div style={headerInnerStyle}>
-        <Image
-          src="/logo.png"
-          alt="Özen İplik"
-          width={260}
-          height={120}
-          style={{
-            width: "100%",
-            maxWidth: "260px",
-            height: "auto",
-            objectFit: "contain",
-          }}
-          priority
-        />
-        <div style={headerTitleStyle}>MASRAF SİSTEMİ</div>
-      </div>
-    </div>
-  )
+ return (
+   <div style={headerWrapStyle}>
+     <div style={headerInnerStyle}>
+       <Image
+         src="/logo.png"
+         alt="Özen İplik"
+         width={260}
+         height={120}
+         style={{
+           width: "100%",
+           maxWidth: "260px",
+           height: "auto",
+           objectFit: "contain",
+         }}
+         priority
+       />
+       <div style={headerTitleStyle}>MASRAF SİSTEMİ</div>
+     </div>
+   </div>
+ )
 }
 
 const pageStyle: React.CSSProperties = {
-  minHeight: "100vh",
-  background: "#f8fafc",
-  fontFamily: "Arial, sans-serif",
-  padding: "16px",
+ minHeight: "100vh",
+ background: "#f8fafc",
+ fontFamily: "Arial, sans-serif",
+ padding: "16px",
 }
 
 const headerWrapStyle: React.CSSProperties = {
-  borderBottom: "4px solid #0f172a",
-  paddingBottom: "14px",
-  marginBottom: "24px",
+ borderBottom: "4px solid #0f172a",
+ paddingBottom: "14px",
+ marginBottom: "24px",
 }
 
 const headerInnerStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  gap: "10px",
+ display: "flex",
+ flexDirection: "column",
+ alignItems: "center",
+ gap: "10px",
 }
 
 const headerTitleStyle: React.CSSProperties = {
-  fontSize: "clamp(22px, 3vw, 34px)",
-  fontWeight: 700,
-  color: "#0f172a",
-  letterSpacing: "1px",
+ fontSize: "clamp(22px, 3vw, 34px)",
+ fontWeight: 700,
+ color: "#0f172a",
+ letterSpacing: "1px",
 }
 
 const contentWrapStyle: React.CSSProperties = {
-  maxWidth: "1100px",
-  margin: "0 auto",
+ maxWidth: "1100px",
+ margin: "0 auto",
 }
 
 const loginOuterStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "center",
-  marginTop: "40px",
+ display: "flex",
+ justifyContent: "center",
+ marginTop: "40px",
 }
 
 const loginBoxStyle: React.CSSProperties = {
-  width: "100%",
-  maxWidth: "460px",
-  background: "#ffffff",
-  borderRadius: "18px",
-  padding: "28px",
-  boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+ width: "100%",
+ maxWidth: "460px",
+ background: "#ffffff",
+ borderRadius: "18px",
+ padding: "28px",
+ boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
 }
 
 const centerBoxStyle: React.CSSProperties = {
-  maxWidth: "420px",
-  margin: "60px auto",
-  background: "#ffffff",
-  borderRadius: "18px",
-  padding: "24px",
-  textAlign: "center",
-  boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+ maxWidth: "420px",
+ margin: "60px auto",
+ background: "#ffffff",
+ borderRadius: "18px",
+ padding: "24px",
+ textAlign: "center",
+ boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
 }
 
 const topBarStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: "16px",
-  flexWrap: "wrap",
-  marginBottom: "20px",
+ display: "flex",
+ justifyContent: "space-between",
+ alignItems: "center",
+ gap: "16px",
+ flexWrap: "wrap",
+ marginBottom: "20px",
 }
 
 const welcomeStyle: React.CSSProperties = {
-  fontSize: "20px",
-  fontWeight: 700,
-  color: "#0f172a",
-  marginBottom: "6px",
+ fontSize: "20px",
+ fontWeight: 700,
+ color: "#0f172a",
+ marginBottom: "6px",
 }
 
 const roleStyle: React.CSSProperties = {
-  color: "#475569",
-  fontSize: "15px",
+ color: "#475569",
+ fontSize: "15px",
 }
 
 const gridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
-  gap: "20px",
+ display: "grid",
+ gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+ gap: "20px",
 }
 
 const cardStyle: React.CSSProperties = {
-  background: "#ffffff",
-  borderRadius: "18px",
-  padding: "24px",
-  boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+ background: "#ffffff",
+ borderRadius: "18px",
+ padding: "24px",
+ boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
 }
 
 const sectionTitleStyle: React.CSSProperties = {
-  marginTop: 0,
-  marginBottom: "18px",
-  fontSize: "28px",
-  color: "#0f172a",
+ marginTop: 0,
+ marginBottom: "18px",
+ fontSize: "28px",
+ color: "#0f172a",
 }
 
 const fieldWrapStyle: React.CSSProperties = {
-  marginBottom: "14px",
+ marginBottom: "14px",
 }
 
 const labelStyle: React.CSSProperties = {
-  display: "block",
-  marginBottom: "6px",
-  fontWeight: 700,
-  color: "#0f172a",
+ display: "block",
+ marginBottom: "6px",
+ fontWeight: 700,
+ color: "#0f172a",
 }
 
 const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "12px 14px",
-  borderRadius: "12px",
-  border: "1px solid #cbd5e1",
-  boxSizing: "border-box",
-  fontSize: "15px",
+ width: "100%",
+ padding: "12px 14px",
+ borderRadius: "12px",
+ border: "1px solid #cbd5e1",
+ boxSizing: "border-box",
+ fontSize: "15px",
 }
 
 const textareaStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: "110px",
-  padding: "12px 14px",
-  borderRadius: "12px",
-  border: "1px solid #cbd5e1",
-  boxSizing: "border-box",
-  fontSize: "15px",
-  resize: "vertical",
+ width: "100%",
+ minHeight: "110px",
+ padding: "12px 14px",
+ borderRadius: "12px",
+ border: "1px solid #cbd5e1",
+ boxSizing: "border-box",
+ fontSize: "15px",
+ resize: "vertical",
 }
 
 const primaryButtonStyle: React.CSSProperties = {
-  background: "#0f172a",
-  color: "#ffffff",
-  border: "none",
-  borderRadius: "12px",
-  padding: "13px 18px",
-  cursor: "pointer",
-  fontWeight: 700,
-  width: "100%",
-  fontSize: "16px",
+ background: "#0f172a",
+ color: "#ffffff",
+ border: "none",
+ borderRadius: "12px",
+ padding: "13px 18px",
+ cursor: "pointer",
+ fontWeight: 700,
+ width: "100%",
+ fontSize: "16px",
 }
 
 const logoutButtonStyle: React.CSSProperties = {
-  background: "#0f172a",
-  color: "#ffffff",
-  border: "none",
-  borderRadius: "12px",
-  padding: "12px 18px",
-  cursor: "pointer",
-  fontWeight: 700,
+ background: "#0f172a",
+ color: "#ffffff",
+ border: "none",
+ borderRadius: "12px",
+ padding: "12px 18px",
+ cursor: "pointer",
+ fontWeight: 700,
 }
 
 const messageStyle: React.CSSProperties = {
-  marginTop: "18px",
-  padding: "12px 14px",
-  borderRadius: "12px",
-  background: "#e2e8f0",
-  color: "#0f172a",
+ marginTop: "18px",
+ padding: "12px 14px",
+ borderRadius: "12px",
+ background: "#e2e8f0",
+ color: "#0f172a",
 }
 
 const emptyStyle: React.CSSProperties = {
-  color: "#64748b",
+ color: "#64748b",
 }
 
 const expenseRowStyle: React.CSSProperties = {
-  borderBottom: "1px solid #e5e7eb",
-  padding: "12px 0",
+ borderBottom: "1px solid #e5e7eb",
+ padding: "12px 0",
 }
 
 const expenseTitleStyle: React.CSSProperties = {
-  fontWeight: 700,
-  color: "#0f172a",
-  marginBottom: "6px",
+ fontWeight: 700,
+ color: "#0f172a",
+ marginBottom: "6px",
 }
 
 const expenseMetaStyle: React.CSSProperties = {
-  color: "#475569",
-  fontSize: "14px",
-  marginBottom: "3px",
+ color: "#475569",
+ fontSize: "14px",
+ marginBottom: "3px",
+}
+
+const actionRowStyle: React.CSSProperties = {
+ display: "flex",
+ gap: "10px",
+ marginTop: "10px",
+ flexWrap: "wrap",
+}
+
+const approveButtonStyle: React.CSSProperties = {
+ background: "#16a34a",
+ color: "#ffffff",
+ border: "none",
+ borderRadius: "10px",
+ padding: "10px 14px",
+ cursor: "pointer",
+ fontWeight: 700,
+}
+
+const rejectButtonStyle: React.CSSProperties = {
+ background: "#dc2626",
+ color: "#ffffff",
+ border: "none",
+ borderRadius: "10px",
+ padding: "10px 14px",
+ cursor: "pointer",
+ fontWeight: 700,
 }
