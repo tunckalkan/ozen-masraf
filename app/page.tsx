@@ -13,6 +13,12 @@ type Profile = {
   role_id: number | null
 }
 
+type ExpenseFile = {
+  expense_id: number
+  file_url: string | null
+  file_name: string | null
+}
+
 type Expense = {
   id: number
   user_id: string
@@ -135,38 +141,24 @@ export default function Page() {
     const activeProfile = currentProfile || profile
     if (!activeProfile) return
 
-    let query = supabase
+    let expenseQuery = supabase
       .from("expenses")
-      .select(`
-        id,
-        user_id,
-        expense_date,
-        vendor_name,
-        description,
-        amount,
-        currency_code,
-        status,
-        created_at,
-        expense_files (
-          file_url,
-          file_name
-        )
-      `)
+      .select("id, user_id, expense_date, vendor_name, description, amount, currency_code, status, created_at")
       .order("created_at", { ascending: false })
 
     if (activeProfile.role_id !== 2) {
-      query = query.eq("user_id", userId)
+      expenseQuery = expenseQuery.eq("user_id", userId)
     }
 
-    const { data, error } = await query
+    const { data: expenseRows, error: expenseError } = await expenseQuery
 
-    if (error) {
-      console.error("Expenses error:", error)
-      setMessage(`Masraflar alınamadı: ${error.message}`)
+    if (expenseError) {
+      console.error("Expenses error:", expenseError)
+      setMessage(`Masraflar alınamadı: ${expenseError.message}`)
       return
     }
 
-    const mapped: Expense[] = (data || []).map((item: any) => ({
+    const baseExpenses: Expense[] = (expenseRows || []).map((item: any) => ({
       id: item.id,
       user_id: item.user_id,
       expense_date: item.expense_date,
@@ -176,11 +168,49 @@ export default function Page() {
       currency_code: item.currency_code,
       status: item.status,
       created_at: item.created_at,
-      file_url: item.expense_files?.[0]?.file_url || null,
-      file_name: item.expense_files?.[0]?.file_name || null,
+      file_url: null,
+      file_name: null,
     }))
 
-    setExpenses(mapped)
+    if (baseExpenses.length === 0) {
+      setExpenses([])
+      return
+    }
+
+    const ids = baseExpenses.map((x) => x.id)
+
+    const { data: fileRows, error: fileError } = await supabase
+      .from("expense_files")
+      .select("expense_id, file_url, file_name")
+      .in("expense_id", ids)
+
+    if (fileError) {
+      console.error("Expense files error:", fileError)
+      setExpenses(baseExpenses)
+      return
+    }
+
+    const fileMap = new Map<number, ExpenseFile>()
+    ;(fileRows || []).forEach((f: any) => {
+      if (!fileMap.has(f.expense_id)) {
+        fileMap.set(f.expense_id, {
+          expense_id: f.expense_id,
+          file_url: f.file_url,
+          file_name: f.file_name,
+        })
+      }
+    })
+
+    const merged = baseExpenses.map((exp) => {
+      const f = fileMap.get(exp.id)
+      return {
+        ...exp,
+        file_url: f?.file_url || null,
+        file_name: f?.file_name || null,
+      }
+    })
+
+    setExpenses(merged)
   }
 
   function roleName(roleId?: number | null) {
@@ -227,13 +257,10 @@ export default function Page() {
     setMessage("")
 
     try {
-      const { error } = await supabase.auth.signOut()
-
-      if (error) {
-        setMessage(`Çıkış yapılamadı: ${error.message}`)
-        return
-      }
-
+      await supabase.auth.signOut()
+    } catch (err: any) {
+      console.error("Logout error:", err)
+    } finally {
       setUser(null)
       setProfile(null)
       setExpenses([])
@@ -245,14 +272,9 @@ export default function Page() {
       setSelectedFile(null)
       setDateFrom("")
       setDateTo("")
-      setEmail("test@ozeniplik.com")
-      setPassword("123456")
-      setMessage("Çıkış yapıldı.")
-    } catch (err: any) {
-      console.error("Logout error:", err)
-      setMessage(`Çıkış yapılamadı: ${err?.message || "bilinmiyor"}`)
-    } finally {
       setLoading(false)
+      setMessage("Çıkış yapıldı.")
+      window.location.reload()
     }
   }
 
@@ -316,7 +338,7 @@ export default function Page() {
         } else {
           const { data: publicData } = supabase.storage.from("expense-files").getPublicUrl(filePath)
 
-          await supabase.from("expense_files").insert([
+          const { error: fileInsertError } = await supabase.from("expense_files").insert([
             {
               expense_id: inserted.id,
               file_name: selectedFile.name,
@@ -325,6 +347,11 @@ export default function Page() {
               uploaded_by: user.id,
             },
           ])
+
+          if (fileInsertError) {
+            console.error("Expense file insert error:", fileInsertError)
+            setMessage(`Masraf kaydedildi fakat dosya kaydı eklenemedi: ${fileInsertError.message}`)
+          }
         }
       }
 
@@ -357,12 +384,7 @@ export default function Page() {
     try {
       const { error } = await supabase
         .from("expenses")
-        .update({
-          status: "approved",
-          approved_by: user.id,
-          approved_at: new Date().toISOString(),
-          rejection_reason: null,
-        })
+        .update({ status: "approved" })
         .eq("id", expenseId)
 
       if (error) {
@@ -370,9 +392,10 @@ export default function Page() {
         return
       }
 
-      setMessage("Masraf onaylandı.")
       await loadExpenses(user.id, profile)
+      setMessage("Masraf onaylandı.")
     } catch (err: any) {
+      console.error("Approve error:", err)
       setMessage(`Onay sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
       setActionLoadingId(null)
@@ -388,12 +411,7 @@ export default function Page() {
     try {
       const { error } = await supabase
         .from("expenses")
-        .update({
-          status: "rejected",
-          approved_by: user.id,
-          approved_at: new Date().toISOString(),
-          rejection_reason: "Muhasebe tarafından reddedildi",
-        })
+        .update({ status: "rejected" })
         .eq("id", expenseId)
 
       if (error) {
@@ -401,9 +419,10 @@ export default function Page() {
         return
       }
 
-      setMessage("Masraf reddedildi.")
       await loadExpenses(user.id, profile)
+      setMessage("Masraf reddedildi.")
     } catch (err: any) {
+      console.error("Reject error:", err)
       setMessage(`Red sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
       setActionLoadingId(null)
@@ -431,7 +450,7 @@ export default function Page() {
       Tutar: item.amount,
       ParaBirimi: item.currency_code || "TRY",
       Durum: item.status,
-      Dosya: item.file_url || "",
+      EkDosya: item.file_url || "",
     }))
 
     const ws = XLSX.utils.json_to_sheet(rows)
@@ -592,7 +611,7 @@ export default function Page() {
                 {isMuhasebe ? "Tüm Masraflar" : "Masraflarım"}
               </h2>
 
-              <button onClick={exportExcel} style={excelButtonStyle}>
+              <button type="button" onClick={exportExcel} style={excelButtonStyle}>
                 Excel Al
               </button>
             </div>
