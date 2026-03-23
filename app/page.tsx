@@ -339,8 +339,9 @@ export default function Page() {
         description,
         amount: Number(amount),
         currency_code: currencyCode,
-        category,
+        category: category,
         payment_method: paymentMethod,
+        payment_type: paymentMethod,
         last4_digits: needsLast4 ? last4Digits : null,
         status: "submitted",
         department_id: profile.department_id || 1,
@@ -349,7 +350,7 @@ export default function Page() {
 
       const { data: inserted, error } = await supabase
         .from("expenses")
-        .insert([insertPayload])
+        .insert([insertPayload as any])
         .select("id")
         .single()
 
@@ -373,9 +374,7 @@ export default function Page() {
 
         if (uploadError) {
           console.error("Upload error:", uploadError)
-          setMessage(
-            `Masraf kaydedildi fakat dosya yüklenemedi: ${uploadError.message}`
-          )
+          setMessage(`Masraf kaydedildi fakat dosya yüklenemedi: ${uploadError.message}`)
         } else {
           const { data: publicData } = supabase.storage
             .from("expense-files")
@@ -395,9 +394,7 @@ export default function Page() {
 
           if (fileInsertError) {
             console.error("Expense file insert error:", fileInsertError)
-            setMessage(
-              `Masraf kaydedildi fakat dosya kaydı eklenemedi: ${fileInsertError.message}`
-            )
+            setMessage(`Masraf kaydedildi fakat dosya kaydı eklenemedi: ${fileInsertError.message}`)
           }
         }
       }
@@ -412,9 +409,7 @@ export default function Page() {
       setLast4Digits("")
       setSelectedFile(null)
 
-      const fileInput = document.getElementById(
-        "expense-file"
-      ) as HTMLInputElement | null
+      const fileInput = document.getElementById("expense-file") as HTMLInputElement | null
       if (fileInput) fileInput.value = ""
 
       setMessage("Masraf kaydedildi.")
