@@ -29,6 +29,7 @@ type Expense = {
   currency_code: string | null
   category: string | null
   payment_method: string | null
+  last4_digits: string | null
   status: string
   created_at: string
   file_url?: string | null
@@ -50,6 +51,7 @@ export default function Page() {
   const [currencyCode, setCurrencyCode] = useState("TRY")
   const [category, setCategory] = useState("Diğer")
   const [paymentMethod, setPaymentMethod] = useState("personal_card")
+  const [last4Digits, setLast4Digits] = useState("")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
   const [dateFrom, setDateFrom] = useState("")
@@ -61,6 +63,7 @@ export default function Page() {
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null)
 
   const isMuhasebe = profile?.role_id === 2
+  const needsLast4 = paymentMethod === "company_card" || paymentMethod === "personal_card"
 
   useEffect(() => {
     let mounted = true
@@ -147,7 +150,7 @@ export default function Page() {
 
     let expenseQuery = supabase
       .from("expenses")
-      .select("id, user_id, expense_date, vendor_name, description, amount, currency_code, category, payment_method, status, created_at")
+      .select("id, user_id, expense_date, vendor_name, description, amount, currency_code, category, payment_method, last4_digits, status, created_at")
       .order("created_at", { ascending: false })
 
     if (activeProfile.role_id !== 2) {
@@ -172,6 +175,7 @@ export default function Page() {
       currency_code: item.currency_code,
       category: item.category,
       payment_method: item.payment_method,
+      last4_digits: item.last4_digits,
       status: item.status,
       created_at: item.created_at,
       file_url: null,
@@ -229,7 +233,6 @@ export default function Page() {
 
   function paymentMethodName(value?: string | null) {
     if (value === "cash") return "Nakit"
-    if (value === "credit_card") return "Kredi Kartı"
     if (value === "bank_transfer") return "Banka Transferi"
     if (value === "company_card") return "Şirket Kartı"
     if (value === "personal_card") return "Kişisel Kart"
@@ -288,6 +291,7 @@ export default function Page() {
       setCurrencyCode("TRY")
       setCategory("Diğer")
       setPaymentMethod("personal_card")
+      setLast4Digits("")
       setSelectedFile(null)
       setDateFrom("")
       setDateTo("")
@@ -312,6 +316,16 @@ export default function Page() {
       return
     }
 
+    if (!paymentMethod) {
+      setMessage("Ödeme yöntemi seçiniz.")
+      return
+    }
+
+    if (needsLast4 && last4Digits.length !== 4) {
+      setMessage("Kartın son 4 hanesini giriniz.")
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -325,8 +339,9 @@ export default function Page() {
             description,
             amount: Number(amount),
             currency_code: currencyCode,
-            category: category,
+            category,
             payment_method: paymentMethod,
+            last4_digits: needsLast4 ? last4Digits : null,
             status: "submitted",
             department_id: profile.department_id || 1,
             category_id: 1,
@@ -383,6 +398,7 @@ export default function Page() {
       setCurrencyCode("TRY")
       setCategory("Diğer")
       setPaymentMethod("personal_card")
+      setLast4Digits("")
       setSelectedFile(null)
 
       const fileInput = document.getElementById("expense-file") as HTMLInputElement | null
@@ -462,7 +478,18 @@ export default function Page() {
     }
   }
 
-  const filteredExpenses = useMemo(() => {
+  const currentMonthExpenses = useMemo(() => {
+    const now = new Date()
+    const currentYear = now.getFullYear()
+    const currentMonth = now.getMonth()
+
+    return expenses.filter((item) => {
+      const d = new Date(item.expense_date)
+      return d.getFullYear() === currentYear && d.getMonth() === currentMonth
+    })
+  }, [expenses])
+
+  const excelExpenses = useMemo(() => {
     return expenses.filter((item) => {
       const okFrom = !dateFrom || item.expense_date >= dateFrom
       const okTo = !dateTo || item.expense_date <= dateTo
@@ -471,19 +498,20 @@ export default function Page() {
   }, [expenses, dateFrom, dateTo])
 
   function exportExcel() {
-    if (filteredExpenses.length === 0) {
+    if (excelExpenses.length === 0) {
       setMessage("Excel için kayıt bulunamadı.")
       return
     }
 
-    const rows = filteredExpenses.map((item) => ({
+    const rows = excelExpenses.map((item) => ({
       Tarih: item.expense_date,
       Firma: item.vendor_name || "",
       Kategori: item.category || "",
       Açıklama: item.description,
       Tutar: item.amount,
       ParaBirimi: item.currency_code || "TRY",
-      ÖdemeYöntemi: paymentMethodName(item.payment_method),
+      OdemeYontemi: paymentMethodName(item.payment_method),
+      KartSon4: item.last4_digits || "",
       Durum: item.status,
       EkDosya: item.file_url || "",
     }))
@@ -627,16 +655,34 @@ export default function Page() {
                 <label style={labelStyle}>Ödeme Yöntemi</label>
                 <select
                   value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
+                  onChange={(e) => {
+                    setPaymentMethod(e.target.value)
+                    if (e.target.value !== "company_card" && e.target.value !== "personal_card") {
+                      setLast4Digits("")
+                    }
+                  }}
                   style={inputStyle}
                 >
                   <option value="cash">Nakit</option>
-                  <option value="credit_card">Kredi Kartı</option>
                   <option value="bank_transfer">Banka Transferi</option>
                   <option value="company_card">Şirket Kartı</option>
                   <option value="personal_card">Kişisel Kart</option>
                 </select>
               </div>
+
+              {(paymentMethod === "company_card" || paymentMethod === "personal_card") && (
+                <div style={fieldWrapStyle}>
+                  <label style={labelStyle}>Kartın Son 4 Hanesi</label>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={last4Digits}
+                    onChange={(e) => setLast4Digits(e.target.value.replace(/\D/g, ""))}
+                    placeholder="1234"
+                    style={inputStyle}
+                  />
+                </div>
+              )}
 
               <div style={fieldWrapStyle}>
                 <label style={labelStyle}>Kategori</label>
@@ -678,7 +724,7 @@ export default function Page() {
           <div style={cardStyle}>
             <div style={listTopBarStyle}>
               <h2 style={sectionTitleStyle}>
-                {isMuhasebe ? "Tüm Masraflar" : "Masraflarım"}
+                {isMuhasebe ? "Bu Ay Tüm Masraflar" : "Bu Ay Masraflarım"}
               </h2>
 
               <button type="button" onClick={exportExcel} style={excelButtonStyle}>
@@ -688,7 +734,7 @@ export default function Page() {
 
             <div style={filterRowStyle}>
               <div style={filterItemStyle}>
-                <label style={labelStyle}>Başlangıç</label>
+                <label style={labelStyle}>Excel Başlangıç</label>
                 <input
                   type="date"
                   value={dateFrom}
@@ -698,7 +744,7 @@ export default function Page() {
               </div>
 
               <div style={filterItemStyle}>
-                <label style={labelStyle}>Bitiş</label>
+                <label style={labelStyle}>Excel Bitiş</label>
                 <input
                   type="date"
                   value={dateTo}
@@ -708,10 +754,10 @@ export default function Page() {
               </div>
             </div>
 
-            {filteredExpenses.length === 0 ? (
-              <div style={emptyStyle}>Kayıt yok.</div>
+            {currentMonthExpenses.length === 0 ? (
+              <div style={emptyStyle}>Bu ay kayıt yok.</div>
             ) : (
-              filteredExpenses.map((item) => (
+              currentMonthExpenses.map((item) => (
                 <div key={item.id} style={expenseRowStyle}>
                   <div style={expenseTitleStyle}>{item.description}</div>
                   <div style={expenseMetaStyle}>Tarih: {item.expense_date}</div>
@@ -723,6 +769,9 @@ export default function Page() {
                   <div style={expenseMetaStyle}>
                     Ödeme Yöntemi: {paymentMethodName(item.payment_method)}
                   </div>
+                  {item.last4_digits && (
+                    <div style={expenseMetaStyle}>Kart Son 4: {item.last4_digits}</div>
+                  )}
                   <div style={expenseMetaStyle}>Durum: {item.status}</div>
 
                   {item.file_url && (
