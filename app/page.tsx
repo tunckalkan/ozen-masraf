@@ -28,6 +28,7 @@ type Expense = {
   amount: number
   currency_code: string | null
   category: string | null
+  payment_method: string | null
   status: string
   created_at: string
   file_url?: string | null
@@ -48,6 +49,7 @@ export default function Page() {
   const [amount, setAmount] = useState("")
   const [currencyCode, setCurrencyCode] = useState("TRY")
   const [category, setCategory] = useState("Diğer")
+  const [paymentMethod, setPaymentMethod] = useState("personal_card")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
   const [dateFrom, setDateFrom] = useState("")
@@ -145,7 +147,7 @@ export default function Page() {
 
     let expenseQuery = supabase
       .from("expenses")
-      .select("id, user_id, expense_date, vendor_name, description, amount, currency_code, category, status, created_at")
+      .select("id, user_id, expense_date, vendor_name, description, amount, currency_code, category, payment_method, status, created_at")
       .order("created_at", { ascending: false })
 
     if (activeProfile.role_id !== 2) {
@@ -169,6 +171,7 @@ export default function Page() {
       amount: item.amount,
       currency_code: item.currency_code,
       category: item.category,
+      payment_method: item.payment_method,
       status: item.status,
       created_at: item.created_at,
       file_url: null,
@@ -224,6 +227,15 @@ export default function Page() {
     return "-"
   }
 
+  function paymentMethodName(value?: string | null) {
+    if (value === "cash") return "Nakit"
+    if (value === "credit_card") return "Kredi Kartı"
+    if (value === "bank_transfer") return "Banka Transferi"
+    if (value === "company_card") return "Şirket Kartı"
+    if (value === "personal_card") return "Kişisel Kart"
+    return value || "-"
+  }
+
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
@@ -275,6 +287,7 @@ export default function Page() {
       setAmount("")
       setCurrencyCode("TRY")
       setCategory("Diğer")
+      setPaymentMethod("personal_card")
       setSelectedFile(null)
       setDateFrom("")
       setDateTo("")
@@ -313,7 +326,7 @@ export default function Page() {
             amount: Number(amount),
             currency_code: currencyCode,
             category: category,
-            payment_type: "personal_card",
+            payment_method: paymentMethod,
             status: "submitted",
             department_id: profile.department_id || 1,
             category_id: 1,
@@ -369,6 +382,7 @@ export default function Page() {
       setAmount("")
       setCurrencyCode("TRY")
       setCategory("Diğer")
+      setPaymentMethod("personal_card")
       setSelectedFile(null)
 
       const fileInput = document.getElementById("expense-file") as HTMLInputElement | null
@@ -469,6 +483,7 @@ export default function Page() {
       Açıklama: item.description,
       Tutar: item.amount,
       ParaBirimi: item.currency_code || "TRY",
+      ÖdemeYöntemi: paymentMethodName(item.payment_method),
       Durum: item.status,
       EkDosya: item.file_url || "",
     }))
@@ -609,6 +624,21 @@ export default function Page() {
               </div>
 
               <div style={fieldWrapStyle}>
+                <label style={labelStyle}>Ödeme Yöntemi</label>
+                <select
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                  style={inputStyle}
+                >
+                  <option value="cash">Nakit</option>
+                  <option value="credit_card">Kredi Kartı</option>
+                  <option value="bank_transfer">Banka Transferi</option>
+                  <option value="company_card">Şirket Kartı</option>
+                  <option value="personal_card">Kişisel Kart</option>
+                </select>
+              </div>
+
+              <div style={fieldWrapStyle}>
                 <label style={labelStyle}>Kategori</label>
                 <select
                   value={category}
@@ -689,6 +719,9 @@ export default function Page() {
                   <div style={expenseMetaStyle}>Kategori: {item.category || "-"}</div>
                   <div style={expenseMetaStyle}>
                     Tutar: {item.amount} {item.currency_code || "TRY"}
+                  </div>
+                  <div style={expenseMetaStyle}>
+                    Ödeme Yöntemi: {paymentMethodName(item.payment_method)}
                   </div>
                   <div style={expenseMetaStyle}>Durum: {item.status}</div>
 
