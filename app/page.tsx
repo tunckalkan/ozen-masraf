@@ -63,7 +63,8 @@ export default function Page() {
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null)
 
   const isMuhasebe = profile?.role_id === 2
-  const needsLast4 = paymentMethod === "company_card" || paymentMethod === "personal_card"
+  const needsLast4 =
+    paymentMethod === "company_card" || paymentMethod === "personal_card"
 
   useEffect(() => {
     let mounted = true
@@ -150,7 +151,9 @@ export default function Page() {
 
     let expenseQuery = supabase
       .from("expenses")
-      .select("id, user_id, expense_date, vendor_name, description, amount, currency_code, category, payment_method, last4_digits, status, created_at")
+      .select(
+        "id, user_id, expense_date, vendor_name, description, amount, currency_code, category, payment_method, last4_digits, status, created_at"
+      )
       .order("created_at", { ascending: false })
 
     if (activeProfile.role_id !== 2) {
@@ -329,24 +332,24 @@ export default function Page() {
     setLoading(true)
 
     try {
+      const insertPayload = {
+        user_id: user.id,
+        expense_date: expenseDate,
+        vendor_name: vendorName || null,
+        description,
+        amount: Number(amount),
+        currency_code: currencyCode,
+        category,
+        payment_method: paymentMethod,
+        last4_digits: needsLast4 ? last4Digits : null,
+        status: "submitted",
+        department_id: profile.department_id || 1,
+        category_id: 1,
+      }
+
       const { data: inserted, error } = await supabase
         .from("expenses")
-        .insert([
-          {
-            user_id: user.id,
-            expense_date: expenseDate,
-            vendor_name: vendorName || null,
-            description,
-            amount: Number(amount),
-            currency_code: currencyCode,
-            category,
-            payment_method: paymentMethod,
-            last4_digits: needsLast4 ? last4Digits : null,
-            status: "submitted",
-            department_id: profile.department_id || 1,
-            category_id: 1,
-          },
-        ])
+        .insert([insertPayload])
         .select("id")
         .single()
 
@@ -370,23 +373,31 @@ export default function Page() {
 
         if (uploadError) {
           console.error("Upload error:", uploadError)
-          setMessage(`Masraf kaydedildi fakat dosya yüklenemedi: ${uploadError.message}`)
+          setMessage(
+            `Masraf kaydedildi fakat dosya yüklenemedi: ${uploadError.message}`
+          )
         } else {
-          const { data: publicData } = supabase.storage.from("expense-files").getPublicUrl(filePath)
+          const { data: publicData } = supabase.storage
+            .from("expense-files")
+            .getPublicUrl(filePath)
 
-          const { error: fileInsertError } = await supabase.from("expense_files").insert([
-            {
-              expense_id: inserted.id,
-              file_name: selectedFile.name,
-              file_path: filePath,
-              file_url: publicData.publicUrl,
-              uploaded_by: user.id,
-            },
-          ])
+          const { error: fileInsertError } = await supabase
+            .from("expense_files")
+            .insert([
+              {
+                expense_id: inserted.id,
+                file_name: selectedFile.name,
+                file_path: filePath,
+                file_url: publicData.publicUrl,
+                uploaded_by: user.id,
+              },
+            ])
 
           if (fileInsertError) {
             console.error("Expense file insert error:", fileInsertError)
-            setMessage(`Masraf kaydedildi fakat dosya kaydı eklenemedi: ${fileInsertError.message}`)
+            setMessage(
+              `Masraf kaydedildi fakat dosya kaydı eklenemedi: ${fileInsertError.message}`
+            )
           }
         }
       }
@@ -401,7 +412,9 @@ export default function Page() {
       setLast4Digits("")
       setSelectedFile(null)
 
-      const fileInput = document.getElementById("expense-file") as HTMLInputElement | null
+      const fileInput = document.getElementById(
+        "expense-file"
+      ) as HTMLInputElement | null
       if (fileInput) fileInput.value = ""
 
       setMessage("Masraf kaydedildi.")
@@ -535,7 +548,6 @@ export default function Page() {
     return (
       <div style={pageStyle}>
         <Header />
-
         <div style={loginOuterStyle}>
           <div style={loginBoxStyle}>
             <h2 style={sectionTitleStyle}>Giriş Yap</h2>
@@ -657,7 +669,10 @@ export default function Page() {
                   value={paymentMethod}
                   onChange={(e) => {
                     setPaymentMethod(e.target.value)
-                    if (e.target.value !== "company_card" && e.target.value !== "personal_card") {
+                    if (
+                      e.target.value !== "company_card" &&
+                      e.target.value !== "personal_card"
+                    ) {
                       setLast4Digits("")
                     }
                   }}
