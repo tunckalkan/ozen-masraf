@@ -22,6 +22,7 @@ type ExpenseFile = {
 type Expense = {
   id: number
   user_id: string
+  full_name?: string | null
   expense_date: string
   vendor_name: string | null
   description: string
@@ -191,6 +192,7 @@ export default function Page() {
     }
 
     const ids = baseExpenses.map((x) => x.id)
+    const userIds = Array.from(new Set(baseExpenses.map((x) => x.user_id).filter(Boolean)))
 
     const { data: fileRows, error: fileError } = await supabase
       .from("expense_files")
@@ -199,8 +201,15 @@ export default function Page() {
 
     if (fileError) {
       console.error("Expense files error:", fileError)
-      setExpenses(baseExpenses)
-      return
+    }
+
+    const { data: profileRows, error: profileError } = await supabase
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", userIds)
+
+    if (profileError) {
+      console.error("Profiles lookup error:", profileError)
     }
 
     const fileMap = new Map<number, ExpenseFile>()
@@ -214,10 +223,16 @@ export default function Page() {
       }
     })
 
+    const userMap = new Map<string, string>()
+    ;(profileRows || []).forEach((p: any) => {
+      userMap.set(p.id, p.full_name)
+    })
+
     const merged = baseExpenses.map((exp) => {
       const f = fileMap.get(exp.id)
       return {
         ...exp,
+        full_name: userMap.get(exp.user_id) || null,
         file_url: f?.file_url || null,
         file_name: f?.file_name || null,
       }
@@ -278,9 +293,7 @@ export default function Page() {
     setMessage("")
 
     try {
-      supabase.auth.signOut().catch((err) => {
-        console.error("Logout background error:", err)
-      })
+      await supabase.auth.signOut()
     } catch (err) {
       console.error("Logout error:", err)
     } finally {
@@ -512,6 +525,7 @@ export default function Page() {
     }
 
     const rows = excelExpenses.map((item) => ({
+      Personel: item.full_name || "",
       Tarih: item.expense_date,
       Firma: item.vendor_name || "",
       Kategori: item.category || "",
@@ -769,6 +783,11 @@ export default function Page() {
             ) : (
               currentMonthExpenses.map((item) => (
                 <div key={item.id} style={expenseRowStyle}>
+                  {isMuhasebe && (
+                    <div style={expenseMetaStyle}>
+                      Personel: {item.full_name || "-"}
+                    </div>
+                  )}
                   <div style={expenseTitleStyle}>{item.description}</div>
                   <div style={expenseMetaStyle}>Tarih: {item.expense_date}</div>
                   <div style={expenseMetaStyle}>Firma: {item.vendor_name || "-"}</div>
