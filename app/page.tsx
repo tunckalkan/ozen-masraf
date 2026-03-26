@@ -11,6 +11,7 @@ type Profile = {
   email: string | null
   department_id: number | null
   role_id: number | null
+  manager_id?: string | null
 }
 
 type ExpenseFile = {
@@ -33,6 +34,11 @@ type Expense = {
   last4_digits: string | null
   status: string
   created_at: string
+  manager_approved_by?: string | null
+  manager_approved_at?: string | null
+  rejected_by?: string | null
+  rejected_at?: string | null
+  rejection_note?: string | null
   file_url?: string | null
   file_name?: string | null
 }
@@ -64,6 +70,8 @@ export default function Page() {
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null)
 
   const isMuhasebe = profile?.role_id === 2
+  const isYonetici = profile?.role_id === 3
+
   const needsLast4 =
     paymentMethod === "company_card" || paymentMethod === "personal_card"
 
@@ -125,7 +133,7 @@ export default function Page() {
   async function loadProfile(userId: string): Promise<Profile | null> {
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, full_name, email, department_id, role_id")
+      .select("id, full_name, email, department_id, role_id, manager_id")
       .eq("id", userId)
       .maybeSingle()
 
@@ -153,12 +161,16 @@ export default function Page() {
     let expenseQuery = supabase
       .from("expenses")
       .select(
-        "id, user_id, expense_date, vendor_name, description, amount, currency_code, category, payment_method, last4_digits, status, created_at"
+        "id, user_id, expense_date, vendor_name, description, amount, currency_code, category, payment_method, last4_digits, status, created_at, manager_approved_by, manager_approved_at, rejected_by, rejected_at, rejection_note"
       )
       .order("created_at", { ascending: false })
 
-    if (activeProfile.role_id !== 2) {
+    if (activeProfile.role_id === 1) {
       expenseQuery = expenseQuery.eq("user_id", userId)
+    } else if (activeProfile.role_id === 2) {
+      expenseQuery = expenseQuery.eq("status", "approved")
+    } else if (activeProfile.role_id === 3) {
+      // yönetici için RLS filtreleyecek
     }
 
     const { data: expenseRows, error: expenseError } = await expenseQuery
@@ -182,6 +194,11 @@ export default function Page() {
       last4_digits: item.last4_digits,
       status: item.status,
       created_at: item.created_at,
+      manager_approved_by: item.manager_approved_by,
+      manager_approved_at: item.manager_approved_at,
+      rejected_by: item.rejected_by,
+      rejected_at: item.rejected_at,
+      rejection_note: item.rejection_note,
       file_url: null,
       file_name: null,
     }))
@@ -194,23 +211,15 @@ export default function Page() {
     const ids = baseExpenses.map((x) => x.id)
     const userIds = Array.from(new Set(baseExpenses.map((x) => x.user_id).filter(Boolean)))
 
-    const { data: fileRows, error: fileError } = await supabase
+    const { data: fileRows } = await supabase
       .from("expense_files")
       .select("expense_id, file_url, file_name")
       .in("expense_id", ids)
 
-    if (fileError) {
-      console.error("Expense files error:", fileError)
-    }
-
-    const { data: profileRows, error: profileError } = await supabase
+    const { data: profileRows } = await supabase
       .from("profiles")
       .select("id, full_name")
       .in("id", userIds)
-
-    if (profileError) {
-      console.error("Profiles lookup error:", profileError)
-    }
 
     const fileMap = new Map<number, ExpenseFile>()
     ;(fileRows || []).forEach((f: any) => {
@@ -245,7 +254,6 @@ export default function Page() {
     if (roleId === 1) return "Personel"
     if (roleId === 2) return "Muhasebe"
     if (roleId === 3) return "Yönetici"
-    if (roleId === 4) return "Admin"
     return "-"
   }
 
@@ -254,6 +262,13 @@ export default function Page() {
     if (value === "bank_transfer") return "Banka Transferi"
     if (value === "company_card") return "Şirket Kartı"
     if (value === "personal_card") return "Kişisel Kart"
+    return value || "-"
+  }
+
+  function statusName(value?: string | null) {
+    if (value === "submitted") return "Yönetici Onayı Bekliyor"
+    if (value === "approved") return "Onaylandı"
+    if (value === "rejected") return "Reddedildi"
     return value || "-"
   }
 
@@ -345,6 +360,8 @@ export default function Page() {
     setLoading(true)
 
     try {
+      const autoApproved = isYonetici
+
       const insertPayload = {
         user_id: user.id,
         expense_date: expenseDate,
@@ -352,11 +369,16 @@ export default function Page() {
         description,
         amount: Number(amount),
         currency_code: currencyCode,
-        category: category,
+        category,
         payment_method: paymentMethod,
         payment_type: paymentMethod,
         last4_digits: needsLast4 ? last4Digits : null,
-        status: "submitted",
+        status: autoApproved ? "approved" : "submitted",
+        manager_approved_by: autoApproved ? user.id : null,
+        manager_approved_at: autoApproved ? new Date().toISOString() : null,
+        rejected_by: null,
+        rejected_at: null,
+        rejection_note: null,
         department_id: profile.department_id || 1,
         category_id: 1,
       }
@@ -368,7 +390,6 @@ export default function Page() {
         .single()
 
       if (error || !inserted) {
-        console.error("Insert error:", error)
         setMessage(`Masraf kaydedilemedi: ${error?.message || "hata"}`)
         return
       }
@@ -386,7 +407,6 @@ export default function Page() {
           })
 
         if (uploadError) {
-          console.error("Upload error:", uploadError)
           setMessage(`Masraf kaydedildi fakat dosya yüklenemedi: ${uploadError.message}`)
         } else {
           const { data: publicData } = supabase.storage
@@ -406,7 +426,6 @@ export default function Page() {
             ])
 
           if (fileInsertError) {
-            console.error("Expense file insert error:", fileInsertError)
             setMessage(`Masraf kaydedildi fakat dosya kaydı eklenemedi: ${fileInsertError.message}`)
           }
         }
@@ -425,26 +444,33 @@ export default function Page() {
       const fileInput = document.getElementById("expense-file") as HTMLInputElement | null
       if (fileInput) fileInput.value = ""
 
-      setMessage("Masraf kaydedildi.")
+      setMessage(autoApproved ? "Masraf onaylı olarak kaydedildi." : "Masraf kaydedildi.")
       await loadExpenses(user.id, profile)
     } catch (err: any) {
-      console.error("Save error:", err)
       setMessage(`Masraf kaydı sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
       setLoading(false)
     }
   }
 
-  async function handleApprove(expenseId: number) {
-    if (!user || !isMuhasebe) return
+  async function handleManagerApprove(expenseId: number) {
+    if (!user || !isYonetici) return
 
     setActionLoadingId(expenseId)
     setMessage("")
 
     try {
+      const nowIso = new Date().toISOString()
       const { error } = await supabase
         .from("expenses")
-        .update({ status: "approved" })
+        .update({
+          status: "approved",
+          manager_approved_by: user.id,
+          manager_approved_at: nowIso,
+          rejected_by: null,
+          rejected_at: null,
+          rejection_note: null,
+        })
         .eq("id", expenseId)
 
       if (error) {
@@ -454,29 +480,43 @@ export default function Page() {
 
       setExpenses((prev) =>
         prev.map((item) =>
-          item.id === expenseId ? { ...item, status: "approved" } : item
+          item.id === expenseId
+            ? {
+                ...item,
+                status: "approved",
+                manager_approved_by: user.id,
+                manager_approved_at: nowIso,
+                rejected_by: null,
+                rejected_at: null,
+                rejection_note: null,
+              }
+            : item
         )
       )
 
       setMessage("Masraf onaylandı.")
     } catch (err: any) {
-      console.error("Approve error:", err)
       setMessage(`Onay sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
       setActionLoadingId(null)
     }
   }
 
-  async function handleReject(expenseId: number) {
-    if (!user || !isMuhasebe) return
+  async function handleManagerReject(expenseId: number) {
+    if (!user || !isYonetici) return
 
     setActionLoadingId(expenseId)
     setMessage("")
 
     try {
+      const nowIso = new Date().toISOString()
       const { error } = await supabase
         .from("expenses")
-        .update({ status: "rejected" })
+        .update({
+          status: "rejected",
+          rejected_by: user.id,
+          rejected_at: nowIso,
+        })
         .eq("id", expenseId)
 
       if (error) {
@@ -486,13 +526,19 @@ export default function Page() {
 
       setExpenses((prev) =>
         prev.map((item) =>
-          item.id === expenseId ? { ...item, status: "rejected" } : item
+          item.id === expenseId
+            ? {
+                ...item,
+                status: "rejected",
+                rejected_by: user.id,
+                rejected_at: nowIso,
+              }
+            : item
         )
       )
 
       setMessage("Masraf reddedildi.")
     } catch (err: any) {
-      console.error("Reject error:", err)
       setMessage(`Red sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
       setActionLoadingId(null)
@@ -534,7 +580,7 @@ export default function Page() {
       ParaBirimi: item.currency_code || "TRY",
       OdemeYontemi: paymentMethodName(item.payment_method),
       KartSon4: item.last4_digits || "",
-      Durum: item.status,
+      Durum: statusName(item.status),
       EkDosya: item.file_url || "",
     }))
 
@@ -542,6 +588,12 @@ export default function Page() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Masraflar")
     XLSX.writeFile(wb, "masraflar.xlsx")
+  }
+
+  function listTitle() {
+    if (isMuhasebe) return "Bu Ay Muhasebeye Düşen Masraflar"
+    if (isYonetici) return "Bu Ay Yönetici Ekranı"
+    return "Bu Ay Masraflarım"
   }
 
   if (booting) {
@@ -586,11 +638,7 @@ export default function Page() {
               </button>
             </form>
 
-            {message && (
-              <div style={{ ...messageStyle, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                {message}
-              </div>
-            )}
+            {message && <div style={messageStyle}>{message}</div>}
           </div>
         </div>
       </div>
@@ -747,10 +795,7 @@ export default function Page() {
 
           <div style={cardStyle}>
             <div style={listTopBarStyle}>
-              <h2 style={sectionTitleStyle}>
-                {isMuhasebe ? "Bu Ay Tüm Masraflar" : "Bu Ay Masraflarım"}
-              </h2>
-
+              <h2 style={sectionTitleStyle}>{listTitle()}</h2>
               <button type="button" onClick={exportExcel} style={excelButtonStyle}>
                 Excel Al
               </button>
@@ -783,11 +828,10 @@ export default function Page() {
             ) : (
               currentMonthExpenses.map((item) => (
                 <div key={item.id} style={expenseRowStyle}>
-                  {isMuhasebe && (
-                    <div style={expenseMetaStyle}>
-                      Personel: {item.full_name || "-"}
-                    </div>
+                  {(isYonetici || isMuhasebe) && (
+                    <div style={expenseMetaStyle}>Personel: {item.full_name || "-"}</div>
                   )}
+
                   <div style={expenseTitleStyle}>{item.description}</div>
                   <div style={expenseMetaStyle}>Tarih: {item.expense_date}</div>
                   <div style={expenseMetaStyle}>Firma: {item.vendor_name || "-"}</div>
@@ -798,10 +842,12 @@ export default function Page() {
                   <div style={expenseMetaStyle}>
                     Ödeme Yöntemi: {paymentMethodName(item.payment_method)}
                   </div>
+
                   {item.last4_digits && (
                     <div style={expenseMetaStyle}>Kart Son 4: {item.last4_digits}</div>
                   )}
-                  <div style={expenseMetaStyle}>Durum: {item.status}</div>
+
+                  <div style={expenseMetaStyle}>Durum: {statusName(item.status)}</div>
 
                   {item.file_url && (
                     <div style={expenseMetaStyle}>
@@ -811,11 +857,11 @@ export default function Page() {
                     </div>
                   )}
 
-                  {isMuhasebe && item.status === "submitted" && (
+                  {isYonetici && item.status === "submitted" && item.user_id !== user.id && (
                     <div style={actionRowStyle}>
                       <button
                         type="button"
-                        onClick={() => handleApprove(item.id)}
+                        onClick={() => handleManagerApprove(item.id)}
                         disabled={actionLoadingId === item.id}
                         style={approveButtonStyle}
                       >
@@ -824,7 +870,7 @@ export default function Page() {
 
                       <button
                         type="button"
-                        onClick={() => handleReject(item.id)}
+                        onClick={() => handleManagerReject(item.id)}
                         disabled={actionLoadingId === item.id}
                         style={rejectButtonStyle}
                       >
@@ -838,11 +884,7 @@ export default function Page() {
           </div>
         </div>
 
-        {message && (
-          <div style={{ ...messageStyle, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-            {message}
-          </div>
-        )}
+        {message && <div style={messageStyle}>{message}</div>}
       </div>
     </div>
   )
