@@ -12,6 +12,7 @@ type Profile = {
   department_id: number | null
   role_id: number | null
   manager_id?: string | null
+  is_active?: boolean | null
 }
 
 type ExpenseFile = {
@@ -24,6 +25,7 @@ type Expense = {
   id: number
   user_id: string
   full_name?: string | null
+  manager_name?: string | null
   expense_date: string
   vendor_name: string | null
   description: string
@@ -41,6 +43,16 @@ type Expense = {
   rejection_note?: string | null
   file_url?: string | null
   file_name?: string | null
+}
+
+type ManagedUser = {
+  id: string
+  full_name: string
+  email: string | null
+  role_id: number | null
+  manager_id: string | null
+  department_id: number | null
+  is_active: boolean | null
 }
 
 export default function Page() {
@@ -69,6 +81,18 @@ export default function Page() {
   const [message, setMessage] = useState("")
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null)
 
+  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([])
+  const [usersLoading, setUsersLoading] = useState(false)
+  const [userActionMessage, setUserActionMessage] = useState("")
+
+  const [newFullName, setNewFullName] = useState("")
+  const [newUserEmail, setNewUserEmail] = useState("")
+  const [newUserPassword, setNewUserPassword] = useState("")
+  const [newUserRoleId, setNewUserRoleId] = useState("1")
+  const [newManagerId, setNewManagerId] = useState("")
+  const [newDepartmentId, setNewDepartmentId] = useState("")
+  const [newIsActive, setNewIsActive] = useState(true)
+
   const isMuhasebe = profile?.role_id === 2
   const isYonetici = profile?.role_id === 3
 
@@ -91,6 +115,9 @@ export default function Page() {
           const loadedProfile = await loadProfile(currentUser.id)
           if (loadedProfile) {
             await loadExpenses(currentUser.id, loadedProfile)
+            if (loadedProfile.role_id === 2) {
+              await loadManagedUsers()
+            }
           }
         }
       } catch (err) {
@@ -114,11 +141,15 @@ export default function Page() {
         const loadedProfile = await loadProfile(currentUser.id)
         if (loadedProfile) {
           await loadExpenses(currentUser.id, loadedProfile)
+          if (loadedProfile.role_id === 2) {
+            await loadManagedUsers()
+          }
         }
       } else {
         setUser(null)
         setProfile(null)
         setExpenses([])
+        setManagedUsers([])
       }
 
       setBooting(false)
@@ -133,12 +164,11 @@ export default function Page() {
   async function loadProfile(userId: string): Promise<Profile | null> {
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, full_name, email, department_id, role_id, manager_id")
+      .select("id, full_name, email, department_id, role_id, manager_id, is_active")
       .eq("id", userId)
       .maybeSingle()
 
     if (error) {
-      console.error("Profile error:", error)
       setProfile(null)
       setMessage(`Profil hatası: ${error.message}`)
       return null
@@ -169,14 +199,11 @@ export default function Page() {
       expenseQuery = expenseQuery.eq("user_id", userId)
     } else if (activeProfile.role_id === 2) {
       expenseQuery = expenseQuery.eq("status", "approved")
-    } else if (activeProfile.role_id === 3) {
-      // yönetici için RLS filtreleyecek
     }
 
     const { data: expenseRows, error: expenseError } = await expenseQuery
 
     if (expenseError) {
-      console.error("Expenses error:", expenseError)
       setMessage(`Masraflar alınamadı: ${expenseError.message}`)
       return
     }
@@ -218,8 +245,21 @@ export default function Page() {
 
     const { data: profileRows } = await supabase
       .from("profiles")
-      .select("id, full_name")
+      .select("id, full_name, manager_id")
       .in("id", userIds)
+
+    const managerIds = Array.from(
+      new Set((profileRows || []).map((p: any) => p.manager_id).filter(Boolean))
+    )
+
+    let managerRows: any[] = []
+    if (managerIds.length > 0) {
+      const { data } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", managerIds)
+      managerRows = data || []
+    }
 
     const fileMap = new Map<number, ExpenseFile>()
     ;(fileRows || []).forEach((f: any) => {
@@ -232,22 +272,66 @@ export default function Page() {
       }
     })
 
-    const userMap = new Map<string, string>()
+    const profileMap = new Map<string, { full_name: string; manager_id: string | null }>()
     ;(profileRows || []).forEach((p: any) => {
-      userMap.set(p.id, p.full_name)
+      profileMap.set(p.id, {
+        full_name: p.full_name,
+        manager_id: p.manager_id,
+      })
+    })
+
+    const managerMap = new Map<string, string>()
+    ;(managerRows || []).forEach((m: any) => {
+      managerMap.set(m.id, m.full_name)
     })
 
     const merged = baseExpenses.map((exp) => {
       const f = fileMap.get(exp.id)
+      const p = profileMap.get(exp.user_id)
+      const managerName = p?.manager_id ? managerMap.get(p.manager_id) || null : null
+
       return {
         ...exp,
-        full_name: userMap.get(exp.user_id) || null,
+        full_name: p?.full_name || null,
+        manager_name: managerName,
         file_url: f?.file_url || null,
         file_name: f?.file_name || null,
       }
     })
 
     setExpenses(merged)
+  }
+
+  async function loadManagedUsers() {
+    if (!user) return
+
+    setUsersLoading(true)
+    setUserActionMessage("")
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      const res = await fetch("/api/admin/users", {
+        headers: {
+          Authorization: `Bearer ${session?.access_token || ""}`,
+        },
+      })
+
+      const json = await res.json()
+
+      if (!res.ok) {
+        setUserActionMessage(json.error || "Kullanıcılar alınamadı.")
+        return
+      }
+
+      setManagedUsers(json.users || [])
+    } catch (err: any) {
+      setUserActionMessage(err?.message || "Kullanıcılar alınamadı.")
+    } finally {
+      setUsersLoading(false)
+    }
   }
 
   function roleName(roleId?: number | null) {
@@ -292,11 +376,13 @@ export default function Page() {
       const loadedProfile = await loadProfile(data.user.id)
       if (loadedProfile) {
         await loadExpenses(data.user.id, loadedProfile)
+        if (loadedProfile.role_id === 2) {
+          await loadManagedUsers()
+        }
       }
 
       setMessage("Giriş başarılı.")
     } catch (err: any) {
-      console.error("Login error:", err)
       setMessage(`Giriş sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
       setLoading(false)
@@ -309,25 +395,12 @@ export default function Page() {
 
     try {
       await supabase.auth.signOut()
-    } catch (err) {
-      console.error("Logout error:", err)
+    } catch {
     } finally {
       setUser(null)
       setProfile(null)
       setExpenses([])
-      setExpenseDate("")
-      setVendorName("")
-      setDescription("")
-      setAmount("")
-      setCurrencyCode("TRY")
-      setCategory("Diğer")
-      setPaymentMethod("personal_card")
-      setLast4Digits("")
-      setSelectedFile(null)
-      setDateFrom("")
-      setDateTo("")
-      setEmail("test@ozeniplik.com")
-      setPassword("123456")
+      setManagedUsers([])
       setLoading(false)
       setMessage("Çıkış yapıldı.")
     }
@@ -344,11 +417,6 @@ export default function Page() {
 
     if (!expenseDate || !description || !amount) {
       setMessage("Tarih, açıklama ve tutar zorunlu.")
-      return
-    }
-
-    if (!paymentMethod) {
-      setMessage("Ödeme yöntemi seçiniz.")
       return
     }
 
@@ -406,28 +474,20 @@ export default function Page() {
             contentType: selectedFile.type,
           })
 
-        if (uploadError) {
-          setMessage(`Masraf kaydedildi fakat dosya yüklenemedi: ${uploadError.message}`)
-        } else {
+        if (!uploadError) {
           const { data: publicData } = supabase.storage
             .from("expense-files")
             .getPublicUrl(filePath)
 
-          const { error: fileInsertError } = await supabase
-            .from("expense_files")
-            .insert([
-              {
-                expense_id: inserted.id,
-                file_name: selectedFile.name,
-                file_path: filePath,
-                file_url: publicData.publicUrl,
-                uploaded_by: user.id,
-              },
-            ])
-
-          if (fileInsertError) {
-            setMessage(`Masraf kaydedildi fakat dosya kaydı eklenemedi: ${fileInsertError.message}`)
-          }
+          await supabase.from("expense_files").insert([
+            {
+              expense_id: inserted.id,
+              file_name: selectedFile.name,
+              file_path: filePath,
+              file_url: publicData.publicUrl,
+              uploaded_by: user.id,
+            },
+          ])
         }
       }
 
@@ -440,9 +500,6 @@ export default function Page() {
       setPaymentMethod("personal_card")
       setLast4Digits("")
       setSelectedFile(null)
-
-      const fileInput = document.getElementById("expense-file") as HTMLInputElement | null
-      if (fileInput) fileInput.value = ""
 
       setMessage(autoApproved ? "Masraf onaylı olarak kaydedildi." : "Masraf kaydedildi.")
       await loadExpenses(user.id, profile)
@@ -478,22 +535,7 @@ export default function Page() {
         return
       }
 
-      setExpenses((prev) =>
-        prev.map((item) =>
-          item.id === expenseId
-            ? {
-                ...item,
-                status: "approved",
-                manager_approved_by: user.id,
-                manager_approved_at: nowIso,
-                rejected_by: null,
-                rejected_at: null,
-                rejection_note: null,
-              }
-            : item
-        )
-      )
-
+      await loadExpenses(user.id, profile)
       setMessage("Masraf onaylandı.")
     } catch (err: any) {
       setMessage(`Onay sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
@@ -524,19 +566,7 @@ export default function Page() {
         return
       }
 
-      setExpenses((prev) =>
-        prev.map((item) =>
-          item.id === expenseId
-            ? {
-                ...item,
-                status: "rejected",
-                rejected_by: user.id,
-                rejected_at: nowIso,
-              }
-            : item
-        )
-      )
-
+      await loadExpenses(user.id, profile)
       setMessage("Masraf reddedildi.")
     } catch (err: any) {
       setMessage(`Red sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
@@ -545,14 +575,144 @@ export default function Page() {
     }
   }
 
+  async function handleCreateUser(e: React.FormEvent) {
+    e.preventDefault()
+    setUserActionMessage("")
+
+    if (!isMuhasebe) {
+      setUserActionMessage("Bu işlem için yetkiniz yok.")
+      return
+    }
+
+    if (!newFullName || !newUserEmail || !newUserPassword) {
+      setUserActionMessage("Ad soyad, email ve şifre zorunlu.")
+      return
+    }
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      const roleIdNum = Number(newUserRoleId)
+      const payload = {
+        full_name: newFullName,
+        email: newUserEmail.trim(),
+        password: newUserPassword,
+        role_id: roleIdNum,
+        manager_id: roleIdNum === 1 ? (newManagerId || null) : null,
+        department_id: newDepartmentId ? Number(newDepartmentId) : null,
+        is_active: newIsActive,
+      }
+
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token || ""}`,
+        },
+        body: JSON.stringify(payload),
+      })
+
+      const json = await res.json()
+
+      if (!res.ok) {
+        setUserActionMessage(json.error || "Kullanıcı oluşturulamadı.")
+        return
+      }
+
+      setNewFullName("")
+      setNewUserEmail("")
+      setNewUserPassword("")
+      setNewUserRoleId("1")
+      setNewManagerId("")
+      setNewDepartmentId("")
+      setNewIsActive(true)
+
+      setUserActionMessage("Kullanıcı oluşturuldu.")
+      await loadManagedUsers()
+    } catch (err: any) {
+      setUserActionMessage(err?.message || "Kullanıcı oluşturulamadı.")
+    }
+  }
+
+  async function handleToggleActive(target: ManagedUser) {
+    setUserActionMessage("")
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token || ""}`,
+        },
+        body: JSON.stringify({
+          id: target.id,
+          is_active: !target.is_active,
+        }),
+      })
+
+      const json = await res.json()
+
+      if (!res.ok) {
+        setUserActionMessage(json.error || "Güncelleme yapılamadı.")
+        return
+      }
+
+      setUserActionMessage("Kullanıcı durumu güncellendi.")
+      await loadManagedUsers()
+    } catch (err: any) {
+      setUserActionMessage(err?.message || "Güncelleme yapılamadı.")
+    }
+  }
+
+  async function handleUpdateManager(target: ManagedUser, managerId: string, roleId: number) {
+    setUserActionMessage("")
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token || ""}`,
+        },
+        body: JSON.stringify({
+          id: target.id,
+          role_id: roleId,
+          manager_id: roleId === 1 ? (managerId || null) : null,
+        }),
+      })
+
+      const json = await res.json()
+
+      if (!res.ok) {
+        setUserActionMessage(json.error || "Yönetici güncellenemedi.")
+        return
+      }
+
+      setUserActionMessage("Kullanıcı güncellendi.")
+      await loadManagedUsers()
+    } catch (err: any) {
+      setUserActionMessage(err?.message || "Yönetici güncellenemedi.")
+    }
+  }
+
   const currentMonthExpenses = useMemo(() => {
     const now = new Date()
-    const currentYear = now.getFullYear()
-    const currentMonth = now.getMonth()
+    const y = now.getFullYear()
+    const m = now.getMonth()
 
     return expenses.filter((item) => {
       const d = new Date(item.expense_date)
-      return d.getFullYear() === currentYear && d.getMonth() === currentMonth
+      return d.getFullYear() === y && d.getMonth() === m
     })
   }, [expenses])
 
@@ -564,6 +724,10 @@ export default function Page() {
     })
   }, [expenses, dateFrom, dateTo])
 
+  const managers = useMemo(() => {
+    return managedUsers.filter((u) => u.role_id === 3 && u.is_active)
+  }, [managedUsers])
+
   function exportExcel() {
     if (excelExpenses.length === 0) {
       setMessage("Excel için kayıt bulunamadı.")
@@ -572,10 +736,11 @@ export default function Page() {
 
     const rows = excelExpenses.map((item) => ({
       Personel: item.full_name || "",
+      Yonetici: item.manager_name || "",
       Tarih: item.expense_date,
       Firma: item.vendor_name || "",
       Kategori: item.category || "",
-      Açıklama: item.description,
+      Aciklama: item.description,
       Tutar: item.amount,
       ParaBirimi: item.currency_code || "TRY",
       OdemeYontemi: paymentMethodName(item.payment_method),
@@ -612,17 +777,11 @@ export default function Page() {
         <div style={loginOuterStyle}>
           <div style={loginBoxStyle}>
             <h2 style={sectionTitleStyle}>Giriş Yap</h2>
-
             <form onSubmit={handleLogin}>
               <div style={fieldWrapStyle}>
                 <label style={labelStyle}>Email</label>
-                <input
-                  style={inputStyle}
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
+                <input style={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)} />
               </div>
-
               <div style={fieldWrapStyle}>
                 <label style={labelStyle}>Şifre</label>
                 <input
@@ -632,12 +791,10 @@ export default function Page() {
                   onChange={(e) => setPassword(e.target.value)}
                 />
               </div>
-
               <button type="submit" disabled={loading} style={primaryButtonStyle}>
                 {loading ? "Giriş yapılıyor..." : "Giriş Yap"}
               </button>
             </form>
-
             {message && <div style={messageStyle}>{message}</div>}
           </div>
         </div>
@@ -726,10 +883,7 @@ export default function Page() {
                   value={paymentMethod}
                   onChange={(e) => {
                     setPaymentMethod(e.target.value)
-                    if (
-                      e.target.value !== "company_card" &&
-                      e.target.value !== "personal_card"
-                    ) {
+                    if (e.target.value !== "company_card" && e.target.value !== "personal_card") {
                       setLast4Digits("")
                     }
                   }}
@@ -811,7 +965,6 @@ export default function Page() {
                   style={inputStyle}
                 />
               </div>
-
               <div style={filterItemStyle}>
                 <label style={labelStyle}>Excel Bitiş</label>
                 <input
@@ -829,7 +982,10 @@ export default function Page() {
               currentMonthExpenses.map((item) => (
                 <div key={item.id} style={expenseRowStyle}>
                   {(isYonetici || isMuhasebe) && (
-                    <div style={expenseMetaStyle}>Personel: {item.full_name || "-"}</div>
+                    <>
+                      <div style={expenseMetaStyle}>Personel: {item.full_name || "-"}</div>
+                      <div style={expenseMetaStyle}>Yönetici: {item.manager_name || "-"}</div>
+                    </>
                   )}
 
                   <div style={expenseTitleStyle}>{item.description}</div>
@@ -842,11 +998,9 @@ export default function Page() {
                   <div style={expenseMetaStyle}>
                     Ödeme Yöntemi: {paymentMethodName(item.payment_method)}
                   </div>
-
                   {item.last4_digits && (
                     <div style={expenseMetaStyle}>Kart Son 4: {item.last4_digits}</div>
                   )}
-
                   <div style={expenseMetaStyle}>Durum: {statusName(item.status)}</div>
 
                   {item.file_url && (
@@ -884,7 +1038,203 @@ export default function Page() {
           </div>
         </div>
 
+        {isMuhasebe && (
+          <div style={{ ...cardStyle, marginTop: "20px" }}>
+            <h2 style={sectionTitleStyle}>Kullanıcı Tanımlama</h2>
+
+            <form onSubmit={handleCreateUser}>
+              <div style={fieldWrapStyle}>
+                <label style={labelStyle}>Ad Soyad</label>
+                <input
+                  style={inputStyle}
+                  value={newFullName}
+                  onChange={(e) => setNewFullName(e.target.value)}
+                />
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={labelStyle}>Email</label>
+                <input
+                  style={inputStyle}
+                  value={newUserEmail}
+                  onChange={(e) => setNewUserEmail(e.target.value)}
+                />
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={labelStyle}>Geçici Şifre</label>
+                <input
+                  style={inputStyle}
+                  value={newUserPassword}
+                  onChange={(e) => setNewUserPassword(e.target.value)}
+                />
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={labelStyle}>Rol</label>
+                <select
+                  style={inputStyle}
+                  value={newUserRoleId}
+                  onChange={(e) => {
+                    setNewUserRoleId(e.target.value)
+                    if (e.target.value !== "1") {
+                      setNewManagerId("")
+                    }
+                  }}
+                >
+                  <option value="1">Personel</option>
+                  <option value="2">Muhasebe</option>
+                  <option value="3">Yönetici</option>
+                </select>
+              </div>
+
+              {newUserRoleId === "1" && (
+                <div style={fieldWrapStyle}>
+                  <label style={labelStyle}>Bağlı Yönetici</label>
+                  <select
+                    style={inputStyle}
+                    value={newManagerId}
+                    onChange={(e) => setNewManagerId(e.target.value)}
+                  >
+                    <option value="">Seçiniz</option>
+                    {managers.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.full_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div style={fieldWrapStyle}>
+                <label style={labelStyle}>Departman ID</label>
+                <input
+                  style={inputStyle}
+                  value={newDepartmentId}
+                  onChange={(e) => setNewDepartmentId(e.target.value.replace(/\D/g, ""))}
+                  placeholder="örn: 1"
+                />
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={labelStyle}>Durum</label>
+                <select
+                  style={inputStyle}
+                  value={newIsActive ? "1" : "0"}
+                  onChange={(e) => setNewIsActive(e.target.value === "1")}
+                >
+                  <option value="1">Aktif</option>
+                  <option value="0">Pasif</option>
+                </select>
+              </div>
+
+              <button type="submit" style={primaryButtonStyle}>
+                Kullanıcı Oluştur
+              </button>
+            </form>
+
+            {userActionMessage && <div style={messageStyle}>{userActionMessage}</div>}
+
+            <div style={{ marginTop: "24px" }}>
+              <h3 style={{ marginTop: 0, marginBottom: "12px", color: "#0f172a" }}>
+                Kayıtlı Kullanıcılar
+              </h3>
+
+              {usersLoading ? (
+                <div style={emptyStyle}>Yükleniyor...</div>
+              ) : managedUsers.length === 0 ? (
+                <div style={emptyStyle}>Kullanıcı yok.</div>
+              ) : (
+                managedUsers.map((u) => (
+                  <ManagedUserCard
+                    key={u.id}
+                    user={u}
+                    managers={managers}
+                    onToggleActive={handleToggleActive}
+                    onUpdateManager={handleUpdateManager}
+                    roleName={roleName}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
         {message && <div style={messageStyle}>{message}</div>}
+      </div>
+    </div>
+  )
+}
+
+function ManagedUserCard({
+  user,
+  managers,
+  onToggleActive,
+  onUpdateManager,
+  roleName,
+}: {
+  user: ManagedUser
+  managers: ManagedUser[]
+  onToggleActive: (u: ManagedUser) => void
+  onUpdateManager: (u: ManagedUser, managerId: string, roleId: number) => void
+  roleName: (roleId?: number | null) => string
+}) {
+  const [localRoleId, setLocalRoleId] = useState(String(user.role_id || 1))
+  const [localManagerId, setLocalManagerId] = useState(user.manager_id || "")
+
+  return (
+    <div style={expenseRowStyle}>
+      <div style={expenseTitleStyle}>{user.full_name}</div>
+      <div style={expenseMetaStyle}>Email: {user.email || "-"}</div>
+      <div style={expenseMetaStyle}>Rol: {roleName(user.role_id)}</div>
+      <div style={expenseMetaStyle}>Durum: {user.is_active ? "Aktif" : "Pasif"}</div>
+
+      <div style={actionRowStyle}>
+        <select
+          style={{ ...inputStyle, maxWidth: "180px" }}
+          value={localRoleId}
+          onChange={(e) => {
+            setLocalRoleId(e.target.value)
+            if (e.target.value !== "1") setLocalManagerId("")
+          }}
+        >
+          <option value="1">Personel</option>
+          <option value="2">Muhasebe</option>
+          <option value="3">Yönetici</option>
+        </select>
+
+        {localRoleId === "1" && (
+          <select
+            style={{ ...inputStyle, maxWidth: "220px" }}
+            value={localManagerId}
+            onChange={(e) => setLocalManagerId(e.target.value)}
+          >
+            <option value="">Yönetici Seç</option>
+            {managers
+              .filter((m) => m.id !== user.id)
+              .map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.full_name}
+                </option>
+              ))}
+          </select>
+        )}
+
+        <button
+          type="button"
+          style={excelButtonStyle}
+          onClick={() => onUpdateManager(user, localManagerId, Number(localRoleId))}
+        >
+          Kaydet
+        </button>
+
+        <button
+          type="button"
+          style={user.is_active ? rejectButtonStyle : approveButtonStyle}
+          onClick={() => onToggleActive(user)}
+        >
+          {user.is_active ? "Pasif Yap" : "Aktif Yap"}
+        </button>
       </div>
     </div>
   )
