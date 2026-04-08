@@ -109,9 +109,9 @@ export async function POST(req: NextRequest) {
     is_active,
   } = body
 
-  if (!full_name || !email || !password) {
+  if (!full_name || !email) {
     return NextResponse.json(
-      { error: "Ad soyad, email ve şifre zorunlu." },
+      { error: "Ad soyad ve email zorunlu." },
       { status: 400 }
     )
   }
@@ -120,27 +120,113 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Geçersiz rol." }, { status: 400 })
   }
 
-  const { data: createdUser, error: createError } =
-    await adminClient.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-    })
+  const normalizedEmail = String(email).trim().toLowerCase()
 
-  if (createError || !createdUser.user) {
-    return NextResponse.json(
-      { error: createError?.message || "Kullanıcı oluşturulamadı." },
-      { status: 400 }
-    )
+  let userId: string | null = null
+  let authCreatedNow = false
+
+  const { data: existingProfiles, error: existingProfilesError } = await adminClient
+    .from("profiles")
+    .select("id, email")
+    .eq("email", normalizedEmail)
+
+  if (existingProfilesError) {
+    return NextResponse.json({ error: existingProfilesError.message }, { status: 400 })
   }
 
-  const userId = createdUser.user.id
+  if (existingProfiles && existingProfiles.length > 0) {
+    userId = existingProfiles[0].id
+  }
+
+  if (!userId) {
+    if (!password) {
+      return NextResponse.json(
+        { error: "Yeni kullanıcı için geçici şifre zorunlu." },
+        { status: 400 }
+      )
+    }
+
+    const { data: createdUser, error: createError } =
+      await adminClient.auth.admin.createUser({
+        email: normalizedEmail,
+        password,
+        email_confirm: true,
+      })
+
+    if (!createError && createdUser.user) {
+      userId = createdUser.user.id
+      authCreatedNow = true
+    } else {
+      if (
+        createError?.message?.toLowerCase().includes("already been registered") ||
+        createError?.message?.toLowerCase().includes("already registered")
+      ) {
+        const { data: authList, error: listError } =
+          await adminClient.auth.admin.listUsers()
+
+        if (listError) {
+          return NextResponse.json({ error: listError.message }, { status: 400 })
+        }
+
+        const existingAuthUser = authList.users.find(
+          (u) => (u.email || "").toLowerCase() === normalizedEmail
+        )
+
+        if (!existingAuthUser) {
+          return NextResponse.json(
+            { error: "Kullanıcı auth içinde var görünüyor ama bulunamadı." },
+            { status: 400 }
+          )
+        }
+
+        userId = existingAuthUser.id
+      } else {
+        return NextResponse.json(
+          { error: createError?.message || "Kullanıcı oluşturulamadı." },
+          { status: 400 }
+        )
+      }
+    }
+  }
+
+  if (!userId) {
+    return NextResponse.json({ error: "Kullanıcı id alınamadı." }, { status: 400 })
+  }
+
+  const { data: existingProfileById } = await adminClient
+    .from("profiles")
+    .select("id")
+    .eq("id", userId)
+    .maybeSingle()
+
+  if (existingProfileById) {
+    const { error: updateError } = await adminClient
+      .from("profiles")
+      .update({
+        full_name,
+        email: normalizedEmail,
+        role_id: Number(role_id),
+        manager_id: manager_id || null,
+        department_id: department_id ? Number(department_id) : null,
+        is_active: is_active ?? true,
+      })
+      .eq("id", userId)
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message }, { status: 400 })
+    }
+
+    return NextResponse.json({
+      success: true,
+      mode: "updated_existing_user",
+    })
+  }
 
   const { error: profileInsertError } = await adminClient.from("profiles").insert([
     {
       id: userId,
       full_name,
-      email,
+      email: normalizedEmail,
       role_id: Number(role_id),
       manager_id: manager_id || null,
       department_id: department_id ? Number(department_id) : null,
@@ -149,45 +235,15 @@ export async function POST(req: NextRequest) {
   ])
 
   if (profileInsertError) {
-    await adminClient.auth.admin.deleteUser(userId)
+    if (authCreatedNow) {
+      await adminClient.auth.admin.deleteUser(userId)
+    }
+
     return NextResponse.json({ error: profileInsertError.message }, { status: 400 })
   }
 
-  return NextResponse.json({ success: true })
-}
-
-export async function PATCH(req: NextRequest) {
-  const authCheck = await getRequesterProfile(req)
-
-  if ("error" in authCheck) {
-    return NextResponse.json({ error: authCheck.error }, { status: 403 })
-  }
-
-  const body = await req.json()
-  const { id, full_name, role_id, manager_id, department_id, is_active } = body
-
-  if (!id) {
-    return NextResponse.json({ error: "Kullanıcı id gerekli." }, { status: 400 })
-  }
-
-  const updatePayload: Record<string, any> = {}
-
-  if (typeof full_name === "string") updatePayload.full_name = full_name
-  if (role_id !== undefined) updatePayload.role_id = Number(role_id)
-  if (manager_id !== undefined) updatePayload.manager_id = manager_id || null
-  if (department_id !== undefined) {
-    updatePayload.department_id = department_id ? Number(department_id) : null
-  }
-  if (is_active !== undefined) updatePayload.is_active = Boolean(is_active)
-
-  const { error } = await adminClient
-    .from("profiles")
-    .update(updatePayload)
-    .eq("id", id)
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 })
-  }
-
-  return NextResponse.json({ success: true })
+  return NextResponse.json({
+    success: true,
+    mode: "created_new_user",
+  })
 }
