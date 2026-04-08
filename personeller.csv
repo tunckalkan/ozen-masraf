@@ -1,0 +1,4 @@
+full_name,email,password,department_id,role_id,is_active
+Ahmet Yılmaz,ahmet@ozeniplik.com,Ozen1234!,1,1,true
+Ayşe Demir,ayse@ozeniplik.com,Ozen1234!,1,1,true
+Muhasebe Kullanıcı,muhasebe@ozeniplik.com,Ozen1234!,2,2,true

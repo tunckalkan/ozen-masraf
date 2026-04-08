@@ -26,6 +26,7 @@ type Expense = {
   user_id: string
   full_name?: string | null
   manager_name?: string | null
+  department_name?: string | null
   expense_date: string
   vendor_name: string | null
   description: string
@@ -55,6 +56,11 @@ type ManagedUser = {
   is_active: boolean | null
 }
 
+type Department = {
+  id: number
+  name: string
+}
+
 export default function Page() {
   const [booting, setBooting] = useState(true)
   const [user, setUser] = useState<any>(null)
@@ -82,6 +88,7 @@ export default function Page() {
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null)
 
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([])
+  const [departments, setDepartments] = useState<Department[]>([])
   const [usersLoading, setUsersLoading] = useState(false)
   const [userActionMessage, setUserActionMessage] = useState("")
 
@@ -150,6 +157,7 @@ export default function Page() {
         setProfile(null)
         setExpenses([])
         setManagedUsers([])
+        setDepartments([])
       }
 
       setBooting(false)
@@ -245,7 +253,7 @@ export default function Page() {
 
     const { data: profileRows } = await supabase
       .from("profiles")
-      .select("id, full_name, manager_id")
+      .select("id, full_name, manager_id, department_id")
       .in("id", userIds)
 
     const managerIds = Array.from(
@@ -261,6 +269,10 @@ export default function Page() {
       managerRows = data || []
     }
 
+    const { data: departmentRows } = await supabase
+      .from("departments")
+      .select("id, name")
+
     const fileMap = new Map<number, ExpenseFile>()
     ;(fileRows || []).forEach((f: any) => {
       if (!fileMap.has(f.expense_id)) {
@@ -272,11 +284,15 @@ export default function Page() {
       }
     })
 
-    const profileMap = new Map<string, { full_name: string; manager_id: string | null }>()
+    const profileMap = new Map<
+      string,
+      { full_name: string; manager_id: string | null; department_id: number | null }
+    >()
     ;(profileRows || []).forEach((p: any) => {
       profileMap.set(p.id, {
         full_name: p.full_name,
         manager_id: p.manager_id,
+        department_id: p.department_id,
       })
     })
 
@@ -285,15 +301,23 @@ export default function Page() {
       managerMap.set(m.id, m.full_name)
     })
 
+    const departmentMap = new Map<number, string>()
+    ;(departmentRows || []).forEach((d: any) => {
+      departmentMap.set(d.id, d.name)
+    })
+
     const merged = baseExpenses.map((exp) => {
       const f = fileMap.get(exp.id)
       const p = profileMap.get(exp.user_id)
       const managerName = p?.manager_id ? managerMap.get(p.manager_id) || null : null
+      const departmentName =
+        p?.department_id ? departmentMap.get(p.department_id) || null : null
 
       return {
         ...exp,
         full_name: p?.full_name || null,
         manager_name: managerName,
+        department_name: departmentName,
         file_url: f?.file_url || null,
         file_name: f?.file_name || null,
       }
@@ -327,6 +351,7 @@ export default function Page() {
       }
 
       setManagedUsers(json.users || [])
+      setDepartments(json.departments || [])
     } catch (err: any) {
       setUserActionMessage(err?.message || "Kullanıcılar alınamadı.")
     } finally {
@@ -354,6 +379,11 @@ export default function Page() {
     if (value === "approved") return "Onaylandı"
     if (value === "rejected") return "Reddedildi"
     return value || "-"
+  }
+
+  function departmentName(departmentId?: number | null) {
+    if (!departmentId) return "-"
+    return departments.find((d) => d.id === departmentId)?.name || "-"
   }
 
   async function handleLogin(e: React.FormEvent) {
@@ -401,6 +431,7 @@ export default function Page() {
       setProfile(null)
       setExpenses([])
       setManagedUsers([])
+      setDepartments([])
       setLoading(false)
       setMessage("Çıkış yapıldı.")
     }
@@ -600,7 +631,7 @@ export default function Page() {
         email: newUserEmail.trim(),
         password: newUserPassword,
         role_id: roleIdNum,
-        manager_id: roleIdNum === 1 ? (newManagerId || null) : null,
+        manager_id: roleIdNum === 1 ? newManagerId || null : null,
         department_id: newDepartmentId ? Number(newDepartmentId) : null,
         is_active: newIsActive,
       }
@@ -670,7 +701,12 @@ export default function Page() {
     }
   }
 
-  async function handleUpdateManager(target: ManagedUser, managerId: string, roleId: number) {
+  async function handleUpdateUser(
+    target: ManagedUser,
+    managerId: string,
+    roleId: number,
+    departmentId: string
+  ) {
     setUserActionMessage("")
 
     try {
@@ -687,21 +723,22 @@ export default function Page() {
         body: JSON.stringify({
           id: target.id,
           role_id: roleId,
-          manager_id: roleId === 1 ? (managerId || null) : null,
+          manager_id: roleId === 1 ? managerId || null : null,
+          department_id: departmentId ? Number(departmentId) : null,
         }),
       })
 
       const json = await res.json()
 
       if (!res.ok) {
-        setUserActionMessage(json.error || "Yönetici güncellenemedi.")
+        setUserActionMessage(json.error || "Kullanıcı güncellenemedi.")
         return
       }
 
       setUserActionMessage("Kullanıcı güncellendi.")
       await loadManagedUsers()
     } catch (err: any) {
-      setUserActionMessage(err?.message || "Yönetici güncellenemedi.")
+      setUserActionMessage(err?.message || "Kullanıcı güncellenemedi.")
     }
   }
 
@@ -737,6 +774,7 @@ export default function Page() {
     const rows = excelExpenses.map((item) => ({
       Personel: item.full_name || "",
       Yonetici: item.manager_name || "",
+      Departman: item.department_name || "",
       Tarih: item.expense_date,
       Firma: item.vendor_name || "",
       Kategori: item.category || "",
@@ -777,11 +815,17 @@ export default function Page() {
         <div style={loginOuterStyle}>
           <div style={loginBoxStyle}>
             <h2 style={sectionTitleStyle}>Giriş Yap</h2>
+
             <form onSubmit={handleLogin}>
               <div style={fieldWrapStyle}>
                 <label style={labelStyle}>Email</label>
-                <input style={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)} />
+                <input
+                  style={inputStyle}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
               </div>
+
               <div style={fieldWrapStyle}>
                 <label style={labelStyle}>Şifre</label>
                 <input
@@ -791,10 +835,12 @@ export default function Page() {
                   onChange={(e) => setPassword(e.target.value)}
                 />
               </div>
+
               <button type="submit" disabled={loading} style={primaryButtonStyle}>
                 {loading ? "Giriş yapılıyor..." : "Giriş Yap"}
               </button>
             </form>
+
             {message && <div style={messageStyle}>{message}</div>}
           </div>
         </div>
@@ -883,7 +929,10 @@ export default function Page() {
                   value={paymentMethod}
                   onChange={(e) => {
                     setPaymentMethod(e.target.value)
-                    if (e.target.value !== "company_card" && e.target.value !== "personal_card") {
+                    if (
+                      e.target.value !== "company_card" &&
+                      e.target.value !== "personal_card"
+                    ) {
                       setLast4Digits("")
                     }
                   }}
@@ -950,6 +999,7 @@ export default function Page() {
           <div style={cardStyle}>
             <div style={listTopBarStyle}>
               <h2 style={sectionTitleStyle}>{listTitle()}</h2>
+
               <button type="button" onClick={exportExcel} style={excelButtonStyle}>
                 Excel Al
               </button>
@@ -965,6 +1015,7 @@ export default function Page() {
                   style={inputStyle}
                 />
               </div>
+
               <div style={filterItemStyle}>
                 <label style={labelStyle}>Excel Bitiş</label>
                 <input
@@ -985,6 +1036,7 @@ export default function Page() {
                     <>
                       <div style={expenseMetaStyle}>Personel: {item.full_name || "-"}</div>
                       <div style={expenseMetaStyle}>Yönetici: {item.manager_name || "-"}</div>
+                      <div style={expenseMetaStyle}>Departman: {item.department_name || "-"}</div>
                     </>
                   )}
 
@@ -998,9 +1050,11 @@ export default function Page() {
                   <div style={expenseMetaStyle}>
                     Ödeme Yöntemi: {paymentMethodName(item.payment_method)}
                   </div>
+
                   {item.last4_digits && (
                     <div style={expenseMetaStyle}>Kart Son 4: {item.last4_digits}</div>
                   )}
+
                   <div style={expenseMetaStyle}>Durum: {statusName(item.status)}</div>
 
                   {item.file_url && (
@@ -1107,13 +1161,19 @@ export default function Page() {
               )}
 
               <div style={fieldWrapStyle}>
-                <label style={labelStyle}>Departman ID</label>
-                <input
+                <label style={labelStyle}>Departman</label>
+                <select
                   style={inputStyle}
                   value={newDepartmentId}
-                  onChange={(e) => setNewDepartmentId(e.target.value.replace(/\D/g, ""))}
-                  placeholder="örn: 1"
-                />
+                  onChange={(e) => setNewDepartmentId(e.target.value)}
+                >
+                  <option value="">Seçiniz</option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div style={fieldWrapStyle}>
@@ -1150,9 +1210,11 @@ export default function Page() {
                     key={u.id}
                     user={u}
                     managers={managers}
+                    departments={departments}
                     onToggleActive={handleToggleActive}
-                    onUpdateManager={handleUpdateManager}
+                    onUpdateUser={handleUpdateUser}
                     roleName={roleName}
+                    departmentName={departmentName}
                   />
                 ))
               )}
@@ -1169,24 +1231,40 @@ export default function Page() {
 function ManagedUserCard({
   user,
   managers,
+  departments,
   onToggleActive,
-  onUpdateManager,
+  onUpdateUser,
   roleName,
+  departmentName,
 }: {
   user: ManagedUser
   managers: ManagedUser[]
+  departments: Department[]
   onToggleActive: (u: ManagedUser) => void
-  onUpdateManager: (u: ManagedUser, managerId: string, roleId: number) => void
+  onUpdateUser: (
+    u: ManagedUser,
+    managerId: string,
+    roleId: number,
+    departmentId: string
+  ) => void
   roleName: (roleId?: number | null) => string
+  departmentName: (departmentId?: number | null) => string
 }) {
   const [localRoleId, setLocalRoleId] = useState(String(user.role_id || 1))
   const [localManagerId, setLocalManagerId] = useState(user.manager_id || "")
+  const [localDepartmentId, setLocalDepartmentId] = useState(
+    user.department_id ? String(user.department_id) : ""
+  )
 
   return (
     <div style={expenseRowStyle}>
       <div style={expenseTitleStyle}>{user.full_name}</div>
       <div style={expenseMetaStyle}>Email: {user.email || "-"}</div>
       <div style={expenseMetaStyle}>Rol: {roleName(user.role_id)}</div>
+      <div style={expenseMetaStyle}>
+        Yönetici: {managers.find((m) => m.id === user.manager_id)?.full_name || "-"}
+      </div>
+      <div style={expenseMetaStyle}>Departman: {departmentName(user.department_id)}</div>
       <div style={expenseMetaStyle}>Durum: {user.is_active ? "Aktif" : "Pasif"}</div>
 
       <div style={actionRowStyle}>
@@ -1195,7 +1273,9 @@ function ManagedUserCard({
           value={localRoleId}
           onChange={(e) => {
             setLocalRoleId(e.target.value)
-            if (e.target.value !== "1") setLocalManagerId("")
+            if (e.target.value !== "1") {
+              setLocalManagerId("")
+            }
           }}
         >
           <option value="1">Personel</option>
@@ -1220,10 +1300,25 @@ function ManagedUserCard({
           </select>
         )}
 
+        <select
+          style={{ ...inputStyle, maxWidth: "180px" }}
+          value={localDepartmentId}
+          onChange={(e) => setLocalDepartmentId(e.target.value)}
+        >
+          <option value="">Departman Seç</option>
+          {departments.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+        </select>
+
         <button
           type="button"
           style={excelButtonStyle}
-          onClick={() => onUpdateManager(user, localManagerId, Number(localRoleId))}
+          onClick={() =>
+            onUpdateUser(user, localManagerId, Number(localRoleId), localDepartmentId)
+          }
         >
           Kaydet
         </button>

@@ -3,28 +3,26 @@ import { createClient } from "@supabase/supabase-js"
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
 const adminClient = createClient(supabaseUrl, serviceRoleKey)
 
 async function getRequesterProfile(req: NextRequest) {
   const authHeader = req.headers.get("authorization")
+
   if (!authHeader?.startsWith("Bearer ")) {
     return { error: "Yetkisiz istek." }
   }
 
   const token = authHeader.replace("Bearer ", "")
 
-  const userClient = createClient(
-    supabaseUrl,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      global: {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+  const userClient = createClient(supabaseUrl, anonKey, {
+    global: {
+      headers: {
+        Authorization: `Bearer ${token}`,
       },
-    }
-  )
+    },
+  })
 
   const {
     data: { user },
@@ -58,16 +56,28 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: authCheck.error }, { status: 403 })
   }
 
-  const { data, error } = await adminClient
+  const { data: users, error: usersError } = await adminClient
     .from("profiles")
     .select("id, full_name, email, role_id, manager_id, department_id, is_active")
     .order("full_name", { ascending: true })
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 })
+  if (usersError) {
+    return NextResponse.json({ error: usersError.message }, { status: 400 })
   }
 
-  return NextResponse.json({ users: data || [] })
+  const { data: departments, error: departmentsError } = await adminClient
+    .from("departments")
+    .select("id, name")
+    .order("name", { ascending: true })
+
+  if (departmentsError) {
+    return NextResponse.json({ error: departmentsError.message }, { status: 400 })
+  }
+
+  return NextResponse.json({
+    users: users || [],
+    departments: departments || [],
+  })
 }
 
 export async function POST(req: NextRequest) {
@@ -129,10 +139,7 @@ export async function POST(req: NextRequest) {
 
   if (profileInsertError) {
     await adminClient.auth.admin.deleteUser(userId)
-    return NextResponse.json(
-      { error: profileInsertError.message },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: profileInsertError.message }, { status: 400 })
   }
 
   return NextResponse.json({ success: true })
@@ -145,15 +152,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   const body = await req.json()
-
-  const {
-    id,
-    full_name,
-    role_id,
-    manager_id,
-    department_id,
-    is_active,
-  } = body
+  const { id, full_name, role_id, manager_id, department_id, is_active } = body
 
   if (!id) {
     return NextResponse.json({ error: "Kullanıcı id gerekli." }, { status: 400 })
