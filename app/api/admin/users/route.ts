@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
+export const dynamic = "force-dynamic"
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -52,6 +54,7 @@ async function getRequesterProfile(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   const authCheck = await getRequesterProfile(req)
+
   if ("error" in authCheck) {
     return NextResponse.json({ error: authCheck.error }, { status: 403 })
   }
@@ -74,14 +77,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: departmentsError.message }, { status: 400 })
   }
 
-  return NextResponse.json({
-    users: users || [],
-    departments: departments || [],
-  })
+  return NextResponse.json(
+    {
+      users: users || [],
+      departments: departments || [],
+    },
+    {
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    }
+  )
 }
 
 export async function POST(req: NextRequest) {
   const authCheck = await getRequesterProfile(req)
+
   if ("error" in authCheck) {
     return NextResponse.json({ error: authCheck.error }, { status: 403 })
   }
@@ -147,6 +158,7 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   const authCheck = await getRequesterProfile(req)
+
   if ("error" in authCheck) {
     return NextResponse.json({ error: authCheck.error }, { status: 403 })
   }
