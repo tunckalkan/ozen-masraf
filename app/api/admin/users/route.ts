@@ -67,6 +67,7 @@ export async function GET(req: NextRequest) {
     const { data: users, error: usersError } = await adminClient
       .from("profiles")
       .select("id, full_name, email, role_id, manager_id, department_id, is_active")
+      .order("is_active", { ascending: false })
       .order("full_name", { ascending: true })
 
     if (usersError) {

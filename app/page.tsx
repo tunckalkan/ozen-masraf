@@ -119,9 +119,13 @@ export default function Page() {
 
         if (currentUser) {
           setUser(currentUser)
+
           const loadedProfile = await loadProfile(currentUser.id)
+          if (!mounted) return
+
           if (loadedProfile) {
             await loadExpenses(currentUser.id, loadedProfile)
+
             if (loadedProfile.role_id === 2) {
               await loadManagedUsers()
             }
@@ -145,9 +149,13 @@ export default function Page() {
 
       if (currentUser) {
         setUser(currentUser)
+
         const loadedProfile = await loadProfile(currentUser.id)
+        if (!mounted) return
+
         if (loadedProfile) {
           await loadExpenses(currentUser.id, loadedProfile)
+
           if (loadedProfile.role_id === 2) {
             await loadManagedUsers()
           }
@@ -160,7 +168,7 @@ export default function Page() {
         setDepartments([])
       }
 
-      setBooting(false)
+      if (mounted) setBooting(false)
     })
 
     return () => {
@@ -338,15 +346,20 @@ export default function Page() {
       } = await supabase.auth.getSession()
 
       const res = await fetch("/api/admin/users", {
+        method: "GET",
         headers: {
           Authorization: `Bearer ${session?.access_token || ""}`,
+          "Cache-Control": "no-store",
         },
       })
 
-      const json = await res.json()
+      const text = await res.text()
+      const json = text ? JSON.parse(text) : {}
 
       if (!res.ok) {
         setUserActionMessage(json.error || "Kullanıcılar alınamadı.")
+        setManagedUsers([])
+        setDepartments([])
         return
       }
 
@@ -354,6 +367,8 @@ export default function Page() {
       setDepartments(json.departments || [])
     } catch (err: any) {
       setUserActionMessage(err?.message || "Kullanıcılar alınamadı.")
+      setManagedUsers([])
+      setDepartments([])
     } finally {
       setUsersLoading(false)
     }
@@ -645,7 +660,8 @@ export default function Page() {
         body: JSON.stringify(payload),
       })
 
-      const json = await res.json()
+      const text = await res.text()
+      const json = text ? JSON.parse(text) : {}
 
       if (!res.ok) {
         setUserActionMessage(json.error || "Kullanıcı oluşturulamadı.")
@@ -660,7 +676,7 @@ export default function Page() {
       setNewDepartmentId("")
       setNewIsActive(true)
 
-      setUserActionMessage("Kullanıcı oluşturuldu.")
+      setUserActionMessage(json.message || "Kullanıcı oluşturuldu.")
       await loadManagedUsers()
     } catch (err: any) {
       setUserActionMessage(err?.message || "Kullanıcı oluşturulamadı.")
@@ -687,14 +703,15 @@ export default function Page() {
         }),
       })
 
-      const json = await res.json()
+      const text = await res.text()
+      const json = text ? JSON.parse(text) : {}
 
       if (!res.ok) {
         setUserActionMessage(json.error || "Güncelleme yapılamadı.")
         return
       }
 
-      setUserActionMessage("Kullanıcı durumu güncellendi.")
+      setUserActionMessage(json.message || "Kullanıcı durumu güncellendi.")
       await loadManagedUsers()
     } catch (err: any) {
       setUserActionMessage(err?.message || "Güncelleme yapılamadı.")
@@ -728,14 +745,15 @@ export default function Page() {
         }),
       })
 
-      const json = await res.json()
+      const text = await res.text()
+      const json = text ? JSON.parse(text) : {}
 
       if (!res.ok) {
         setUserActionMessage(json.error || "Kullanıcı güncellenemedi.")
         return
       }
 
-      setUserActionMessage("Kullanıcı güncellendi.")
+      setUserActionMessage(json.message || "Kullanıcı güncellendi.")
       await loadManagedUsers()
     } catch (err: any) {
       setUserActionMessage(err?.message || "Kullanıcı güncellenemedi.")
@@ -1196,27 +1214,55 @@ export default function Page() {
             {userActionMessage && <div style={messageStyle}>{userActionMessage}</div>}
 
             <div style={{ marginTop: "24px" }}>
-              <h3 style={{ marginTop: 0, marginBottom: "12px", color: "#0f172a" }}>
-                Kayıtlı Kullanıcılar
-              </h3>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: "12px",
+                  flexWrap: "wrap",
+                  marginBottom: "12px",
+                }}
+              >
+                <h3 style={{ margin: 0, color: "#0f172a" }}>
+                  Kayıtlı Kullanıcılar
+                </h3>
+
+                <button
+                  type="button"
+                  style={excelButtonStyle}
+                  onClick={loadManagedUsers}
+                >
+                  Listeyi Yenile
+                </button>
+              </div>
 
               {usersLoading ? (
                 <div style={emptyStyle}>Yükleniyor...</div>
               ) : managedUsers.length === 0 ? (
                 <div style={emptyStyle}>Kullanıcı yok.</div>
               ) : (
-                managedUsers.map((u) => (
-                  <ManagedUserCard
-                    key={u.id}
-                    user={u}
-                    managers={managers}
-                    departments={departments}
-                    onToggleActive={handleToggleActive}
-                    onUpdateUser={handleUpdateUser}
-                    roleName={roleName}
-                    departmentName={departmentName}
-                  />
-                ))
+                [...managedUsers]
+                  .sort((a, b) => {
+                    const aActive = a.is_active ? 1 : 0
+                    const bActive = b.is_active ? 1 : 0
+
+                    if (aActive !== bActive) return bActive - aActive
+
+                    return (a.full_name || "").localeCompare(b.full_name || "", "tr")
+                  })
+                  .map((u) => (
+                    <ManagedUserCard
+                      key={u.id}
+                      user={u}
+                      managers={managers}
+                      departments={departments}
+                      onToggleActive={handleToggleActive}
+                      onUpdateUser={handleUpdateUser}
+                      roleName={roleName}
+                      departmentName={departmentName}
+                    />
+                  ))
               )}
             </div>
           </div>
@@ -1598,3 +1644,5 @@ const fileLinkStyle: React.CSSProperties = {
   textDecoration: "none",
   fontWeight: 700,
 }
+
+
