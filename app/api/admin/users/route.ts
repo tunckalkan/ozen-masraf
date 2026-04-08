@@ -283,10 +283,28 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { id, full_name, role_id, manager_id, department_id, is_active } = body
+    const {
+      id,
+      full_name,
+      role_id,
+      manager_id,
+      department_id,
+      is_active,
+      password,
+    } = body
 
     if (!id) {
       return NextResponse.json({ error: "Kullanıcı id gerekli." }, { status: 400 })
+    }
+
+    if (password !== undefined && password !== null && String(password).trim() !== "") {
+      const { error: passwordError } = await adminClient.auth.admin.updateUserById(id, {
+        password: String(password),
+      })
+
+      if (passwordError) {
+        return NextResponse.json({ error: passwordError.message }, { status: 400 })
+      }
     }
 
     const updatePayload: Record<string, any> = {}
@@ -299,18 +317,23 @@ export async function PATCH(req: NextRequest) {
     }
     if (is_active !== undefined) updatePayload.is_active = Boolean(is_active)
 
-    const { error } = await adminClient
-      .from("profiles")
-      .update(updatePayload)
-      .eq("id", id)
+    if (Object.keys(updatePayload).length > 0) {
+      const { error } = await adminClient
+        .from("profiles")
+        .update(updatePayload)
+        .eq("id", id)
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 })
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 400 })
+      }
     }
 
     return NextResponse.json({
       success: true,
-      message: "Kullanıcı güncellendi.",
+      message:
+        password && String(password).trim() !== ""
+          ? "Kullanıcı bilgileri ve şifre güncellendi."
+          : "Kullanıcı güncellendi.",
     })
   } catch (err: any) {
     return NextResponse.json(

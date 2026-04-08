@@ -722,7 +722,8 @@ export default function Page() {
     target: ManagedUser,
     managerId: string,
     roleId: number,
-    departmentId: string
+    departmentId: string,
+    newPassword?: string
   ) {
     setUserActionMessage("")
 
@@ -742,6 +743,7 @@ export default function Page() {
           role_id: roleId,
           manager_id: roleId === 1 ? managerId || null : null,
           department_id: departmentId ? Number(departmentId) : null,
+          password: newPassword && newPassword.trim() !== "" ? newPassword : undefined,
         }),
       })
 
@@ -1291,7 +1293,8 @@ function ManagedUserCard({
     u: ManagedUser,
     managerId: string,
     roleId: number,
-    departmentId: string
+    departmentId: string,
+    newPassword?: string
   ) => void
   roleName: (roleId?: number | null) => string
   departmentName: (departmentId?: number | null) => string
@@ -1301,6 +1304,7 @@ function ManagedUserCard({
   const [localDepartmentId, setLocalDepartmentId] = useState(
     user.department_id ? String(user.department_id) : ""
   )
+  const [localPassword, setLocalPassword] = useState("")
 
   return (
     <div style={expenseRowStyle}>
@@ -1375,6 +1379,34 @@ function ManagedUserCard({
           onClick={() => onToggleActive(user)}
         >
           {user.is_active ? "Pasif Yap" : "Aktif Yap"}
+        </button>
+      </div>
+
+      <div style={{ ...actionRowStyle, marginTop: "12px" }}>
+        <input
+          type="text"
+          placeholder="Yeni şifre"
+          value={localPassword}
+          onChange={(e) => setLocalPassword(e.target.value)}
+          style={{ ...inputStyle, maxWidth: "240px" }}
+        />
+
+        <button
+          type="button"
+          style={approveButtonStyle}
+          onClick={() => {
+            if (!localPassword.trim()) return
+            onUpdateUser(
+              user,
+              localManagerId,
+              Number(localRoleId),
+              localDepartmentId,
+              localPassword
+            )
+            setLocalPassword("")
+          }}
+        >
+          Şifreyi Güncelle
         </button>
       </div>
     </div>
@@ -1644,5 +1676,3 @@ const fileLinkStyle: React.CSSProperties = {
   textDecoration: "none",
   fontWeight: 700,
 }
-
-
