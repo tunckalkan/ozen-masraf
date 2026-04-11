@@ -221,7 +221,7 @@ export default function Page() {
     } else if (activeProfile.role_id === 2) {
       expenseQuery = expenseQuery.eq("status", "approved")
     } else if (activeProfile.role_id === 4) {
-      // gizli admin her şeyi görür
+      // admin her şeyi görür
     }
 
     const { data: expenseRows, error: expenseError } = await expenseQuery
@@ -363,8 +363,6 @@ export default function Page() {
       const text = await res.text()
       const json = text ? JSON.parse(text) : {}
 
-      console.log("ADMIN USERS GET", { status: res.status, json })
-
       if (!res.ok) {
         setUserActionMessage(json.error || "Kullanıcılar alınamadı.")
         setManagedUsers([])
@@ -375,7 +373,6 @@ export default function Page() {
       setManagedUsers(json.users || [])
       setDepartments(json.departments || [])
     } catch (err: any) {
-      console.error("loadManagedUsers error", err)
       setUserActionMessage(err?.message || "Kullanıcılar alınamadı.")
       setManagedUsers([])
       setDepartments([])
@@ -487,14 +484,6 @@ export default function Page() {
     try {
       const autoApproved = isYonetici || isHiddenAdmin
 
-      console.log("ROLE DEBUG", {
-        role_id: profile?.role_id,
-        isYonetici,
-        isHiddenAdmin,
-        autoApproved,
-        userId: user?.id,
-      })
-
       const insertPayload = {
         user_id: user.id,
         expense_date: expenseDate,
@@ -516,15 +505,11 @@ export default function Page() {
         category_id: 1,
       }
 
-      console.log("INSERT PAYLOAD", insertPayload)
-
       const { data: inserted, error } = await supabase
         .from("expenses")
         .insert([insertPayload as any])
         .select("id, status, manager_approved_by, manager_approved_at")
         .single()
-
-      console.log("INSERT RESULT", { inserted, error })
 
       if (error || !inserted) {
         setMessage(`Masraf kaydedilemedi: ${error?.message || "hata"}`)
@@ -573,7 +558,6 @@ export default function Page() {
       setMessage(autoApproved ? "Masraf onaylı olarak kaydedildi." : "Masraf kaydedildi.")
       await loadExpenses(user.id, profile)
     } catch (err: any) {
-      console.error("handleSave error", err)
       setMessage(`Masraf kaydı sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
       setLoading(false)
@@ -816,22 +800,50 @@ export default function Page() {
     }
 
     const rows = excelExpenses.map((item) => ({
-      Personel: item.full_name || "",
-      Yonetici: item.manager_name || "",
-      Departman: item.department_name || "",
-      Tarih: item.expense_date,
-      Firma: item.vendor_name || "",
-      Kategori: item.category || "",
-      Aciklama: item.description,
-      Tutar: item.amount,
+      Personel: item.full_name || "-",
+      Yonetici: item.manager_name || "-",
+      Departman: item.department_name || "-",
+      Tarih: item.expense_date || "-",
+      Firma: item.vendor_name || "-",
+      Kategori: item.category || "-",
+      Aciklama: item.description || "-",
+      Tutar: item.amount ?? 0,
       ParaBirimi: item.currency_code || "TRY",
       OdemeYontemi: paymentMethodName(item.payment_method),
-      KartSon4: item.last4_digits || "",
+      KartSon4: item.last4_digits || "-",
       Durum: statusName(item.status),
-      EkDosya: item.file_url || "",
+      EkDosya: item.file_url || "-",
     }))
 
     const ws = XLSX.utils.json_to_sheet(rows)
+
+    const range = XLSX.utils.decode_range(ws["!ref"] || "A1")
+
+    for (let row = 1; row <= range.e.r; row++) {
+      const cellAddress = XLSX.utils.encode_cell({ r: row, c: 12 })
+      const cell = ws[cellAddress]
+
+      if (cell && cell.v && cell.v !== "-") {
+        cell.l = { Target: String(cell.v) }
+      }
+    }
+
+    ws["!cols"] = [
+      { wch: 22 },
+      { wch: 22 },
+      { wch: 16 },
+      { wch: 14 },
+      { wch: 20 },
+      { wch: 18 },
+      { wch: 28 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 10 },
+      { wch: 22 },
+      { wch: 60 },
+    ]
+
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Masraflar")
     XLSX.writeFile(wb, "masraflar.xlsx")
@@ -1104,7 +1116,12 @@ export default function Page() {
 
                   {item.file_url && (
                     <div style={expenseMetaStyle}>
-                      <a href={item.file_url} target="_blank" rel="noreferrer" style={fileLinkStyle}>
+                      <a
+                        href={item.file_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={fileLinkStyle}
+                      >
                         Ek Dosya: {item.file_name || "Görüntüle"}
                       </a>
                     </div>
@@ -1251,9 +1268,7 @@ export default function Page() {
                   marginBottom: "12px",
                 }}
               >
-                <h3 style={{ margin: 0, color: "#0f172a" }}>
-                  Kayıtlı Kullanıcılar
-                </h3>
+                <h3 style={{ margin: 0, color: "#0f172a" }}>Kayıtlı Kullanıcılar</h3>
 
                 <button
                   type="button"
