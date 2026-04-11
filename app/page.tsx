@@ -363,6 +363,8 @@ export default function Page() {
       const text = await res.text()
       const json = text ? JSON.parse(text) : {}
 
+      console.log("ADMIN USERS GET", { status: res.status, json })
+
       if (!res.ok) {
         setUserActionMessage(json.error || "Kullanıcılar alınamadı.")
         setManagedUsers([])
@@ -373,6 +375,7 @@ export default function Page() {
       setManagedUsers(json.users || [])
       setDepartments(json.departments || [])
     } catch (err: any) {
+      console.error("loadManagedUsers error", err)
       setUserActionMessage(err?.message || "Kullanıcılar alınamadı.")
       setManagedUsers([])
       setDepartments([])
@@ -484,6 +487,14 @@ export default function Page() {
     try {
       const autoApproved = isYonetici || isHiddenAdmin
 
+      console.log("ROLE DEBUG", {
+        role_id: profile?.role_id,
+        isYonetici,
+        isHiddenAdmin,
+        autoApproved,
+        userId: user?.id,
+      })
+
       const insertPayload = {
         user_id: user.id,
         expense_date: expenseDate,
@@ -505,11 +516,15 @@ export default function Page() {
         category_id: 1,
       }
 
+      console.log("INSERT PAYLOAD", insertPayload)
+
       const { data: inserted, error } = await supabase
         .from("expenses")
         .insert([insertPayload as any])
-        .select("id")
+        .select("id, status, manager_approved_by, manager_approved_at")
         .single()
+
+      console.log("INSERT RESULT", { inserted, error })
 
       if (error || !inserted) {
         setMessage(`Masraf kaydedilemedi: ${error?.message || "hata"}`)
@@ -558,6 +573,7 @@ export default function Page() {
       setMessage(autoApproved ? "Masraf onaylı olarak kaydedildi." : "Masraf kaydedildi.")
       await loadExpenses(user.id, profile)
     } catch (err: any) {
+      console.error("handleSave error", err)
       setMessage(`Masraf kaydı sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
       setLoading(false)
@@ -1684,4 +1700,3 @@ const fileLinkStyle: React.CSSProperties = {
   textDecoration: "none",
   fontWeight: 700,
 }
-
