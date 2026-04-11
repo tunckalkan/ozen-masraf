@@ -385,7 +385,7 @@ export default function Page() {
     if (roleId === 1) return "Personel"
     if (roleId === 2) return "Muhasebe"
     if (roleId === 3) return "Yönetici"
-    if (roleId === 4) return "Yetkili"
+    if (roleId === 4) return "Yönetici"
     return "-"
   }
 
@@ -482,7 +482,7 @@ export default function Page() {
     setLoading(true)
 
     try {
-      const autoApproved = isYonetici
+      const autoApproved = isYonetici || isHiddenAdmin
 
       const insertPayload = {
         user_id: user.id,
@@ -790,7 +790,7 @@ export default function Page() {
   }, [expenses, dateFrom, dateTo])
 
   const managers = useMemo(() => {
-    return managedUsers.filter((u) => u.role_id === 3 && u.is_active)
+    return managedUsers.filter((u) => (u.role_id === 3 || u.role_id === 4) && u.is_active)
   }, [managedUsers])
 
   function exportExcel() {
@@ -822,7 +822,7 @@ export default function Page() {
   }
 
   function listTitle() {
-    if (isHiddenAdmin) return "Bu Ay Tüm Masraflar"
+    if (canSeeAllExpenses) return "Bu Ay Tüm Masraflar"
     if (isMuhasebe) return "Bu Ay Muhasebeye Düşen Masraflar"
     if (isYonetici) return "Bu Ay Yönetici Ekranı"
     return "Bu Ay Masraflarım"
@@ -1684,3 +1684,4 @@ const fileLinkStyle: React.CSSProperties = {
   textDecoration: "none",
   fontWeight: 700,
 }
+

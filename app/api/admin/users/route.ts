@@ -65,11 +65,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: authCheck.error }, { status: 403 })
     }
 
-    // Gizli admin kullanıcıları listede göstermiyoruz
     const { data: users, error: usersError } = await adminClient
       .from("profiles")
       .select("id, full_name, email, role_id, manager_id, department_id, is_active")
-      .neq("role_id", 4)
       .order("is_active", { ascending: false })
       .order("full_name", { ascending: true })
 
@@ -132,7 +130,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Panelden sadece 1,2,3 oluşturulabilir. 4 gizli admindir.
+    // Panelden sadece 1,2,3 oluşturulabilir
     if (![1, 2, 3].includes(Number(role_id))) {
       return NextResponse.json({ error: "Geçersiz rol." }, { status: 400 })
     }
