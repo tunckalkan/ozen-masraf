@@ -102,6 +102,11 @@ export default function Page() {
 
   const isMuhasebe = profile?.role_id === 2
   const isYonetici = profile?.role_id === 3
+  const isHiddenAdmin = profile?.role_id === 4
+
+  const canManageUsers = isMuhasebe || isHiddenAdmin
+  const canSeeAllExpenses = isHiddenAdmin
+  const canApproveExpenses = isYonetici || isHiddenAdmin
 
   const needsLast4 =
     paymentMethod === "company_card" || paymentMethod === "personal_card"
@@ -126,7 +131,7 @@ export default function Page() {
           if (loadedProfile) {
             await loadExpenses(currentUser.id, loadedProfile)
 
-            if (loadedProfile.role_id === 2) {
+            if (loadedProfile.role_id === 2 || loadedProfile.role_id === 4) {
               await loadManagedUsers()
             }
           }
@@ -156,7 +161,7 @@ export default function Page() {
         if (loadedProfile) {
           await loadExpenses(currentUser.id, loadedProfile)
 
-          if (loadedProfile.role_id === 2) {
+          if (loadedProfile.role_id === 2 || loadedProfile.role_id === 4) {
             await loadManagedUsers()
           }
         }
@@ -215,6 +220,8 @@ export default function Page() {
       expenseQuery = expenseQuery.eq("user_id", userId)
     } else if (activeProfile.role_id === 2) {
       expenseQuery = expenseQuery.eq("status", "approved")
+    } else if (activeProfile.role_id === 4) {
+      // gizli admin her şeyi görür
     }
 
     const { data: expenseRows, error: expenseError } = await expenseQuery
@@ -378,6 +385,7 @@ export default function Page() {
     if (roleId === 1) return "Personel"
     if (roleId === 2) return "Muhasebe"
     if (roleId === 3) return "Yönetici"
+    if (roleId === 4) return "Yetkili"
     return "-"
   }
 
@@ -421,7 +429,7 @@ export default function Page() {
       const loadedProfile = await loadProfile(data.user.id)
       if (loadedProfile) {
         await loadExpenses(data.user.id, loadedProfile)
-        if (loadedProfile.role_id === 2) {
+        if (loadedProfile.role_id === 2 || loadedProfile.role_id === 4) {
           await loadManagedUsers()
         }
       }
@@ -557,7 +565,7 @@ export default function Page() {
   }
 
   async function handleManagerApprove(expenseId: number) {
-    if (!user || !isYonetici) return
+    if (!user || !canApproveExpenses) return
 
     setActionLoadingId(expenseId)
     setMessage("")
@@ -591,7 +599,7 @@ export default function Page() {
   }
 
   async function handleManagerReject(expenseId: number) {
-    if (!user || !isYonetici) return
+    if (!user || !canApproveExpenses) return
 
     setActionLoadingId(expenseId)
     setMessage("")
@@ -625,7 +633,7 @@ export default function Page() {
     e.preventDefault()
     setUserActionMessage("")
 
-    if (!isMuhasebe) {
+    if (!canManageUsers) {
       setUserActionMessage("Bu işlem için yetkiniz yok.")
       return
     }
@@ -814,6 +822,7 @@ export default function Page() {
   }
 
   function listTitle() {
+    if (isHiddenAdmin) return "Bu Ay Tüm Masraflar"
     if (isMuhasebe) return "Bu Ay Muhasebeye Düşen Masraflar"
     if (isYonetici) return "Bu Ay Yönetici Ekranı"
     return "Bu Ay Masraflarım"
@@ -1052,7 +1061,7 @@ export default function Page() {
             ) : (
               currentMonthExpenses.map((item) => (
                 <div key={item.id} style={expenseRowStyle}>
-                  {(isYonetici || isMuhasebe) && (
+                  {(isYonetici || isMuhasebe || isHiddenAdmin) && (
                     <>
                       <div style={expenseMetaStyle}>Personel: {item.full_name || "-"}</div>
                       <div style={expenseMetaStyle}>Yönetici: {item.manager_name || "-"}</div>
@@ -1085,7 +1094,7 @@ export default function Page() {
                     </div>
                   )}
 
-                  {isYonetici && item.status === "submitted" && item.user_id !== user.id && (
+                  {canApproveExpenses && item.status === "submitted" && item.user_id !== user.id && (
                     <div style={actionRowStyle}>
                       <button
                         type="button"
@@ -1112,7 +1121,7 @@ export default function Page() {
           </div>
         </div>
 
-        {isMuhasebe && (
+        {canManageUsers && (
           <div style={{ ...cardStyle, marginTop: "20px" }}>
             <h2 style={sectionTitleStyle}>Kullanıcı Tanımlama</h2>
 
@@ -1250,7 +1259,6 @@ export default function Page() {
                     const bActive = b.is_active ? 1 : 0
 
                     if (aActive !== bActive) return bActive - aActive
-
                     return (a.full_name || "").localeCompare(b.full_name || "", "tr")
                   })
                   .map((u) => (
