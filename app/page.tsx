@@ -26,6 +26,7 @@ type Expense = {
   user_id: string
   full_name?: string | null
   manager_name?: string | null
+  manager_id?: string | null
   department_name?: string | null
   expense_date: string
   vendor_name: string | null
@@ -106,8 +107,6 @@ export default function Page() {
 
   const canManageUsers = isMuhasebe || isHiddenAdmin
   const canSeeAllExpenses = isHiddenAdmin
-  const canApproveExpenses = isYonetici || isHiddenAdmin
-
   const needsLast4 =
     paymentMethod === "company_card" || paymentMethod === "personal_card"
 
@@ -149,7 +148,6 @@ export default function Page() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
       const currentUser = session?.user ?? null
-
       if (!mounted) return
 
       if (currentUser) {
@@ -220,8 +218,10 @@ export default function Page() {
       expenseQuery = expenseQuery.eq("user_id", userId)
     } else if (activeProfile.role_id === 2) {
       expenseQuery = expenseQuery.eq("status", "approved")
+    } else if (activeProfile.role_id === 3) {
+      // Yönetici tüm masrafları görebilir, ama sadece kendi personelini onaylayabilir.
     } else if (activeProfile.role_id === 4) {
-      // admin her şeyi görür
+      // Admin her şeyi görür.
     }
 
     const { data: expenseRows, error: expenseError } = await expenseQuery
@@ -301,7 +301,11 @@ export default function Page() {
 
     const profileMap = new Map<
       string,
-      { full_name: string; manager_id: string | null; department_id: number | null }
+      {
+        full_name: string
+        manager_id: string | null
+        department_id: number | null
+      }
     >()
     ;(profileRows || []).forEach((p: any) => {
       profileMap.set(p.id, {
@@ -332,6 +336,7 @@ export default function Page() {
         ...exp,
         full_name: p?.full_name || null,
         manager_name: managerName,
+        manager_id: p?.manager_id || null,
         department_name: departmentName,
         file_url: f?.file_url || null,
         file_name: f?.file_name || null,
@@ -370,7 +375,8 @@ export default function Page() {
         return
       }
 
-      setManagedUsers(json.users || [])
+      const filteredUsers = (json.users || []).filter((u: any) => u.role_id !== 4)
+      setManagedUsers(filteredUsers)
       setDepartments(json.departments || [])
     } catch (err: any) {
       setUserActionMessage(err?.message || "Kullanıcılar alınamadı.")
@@ -449,6 +455,7 @@ export default function Page() {
     try {
       await supabase.auth.signOut()
     } catch {
+      // noop
     } finally {
       setUser(null)
       setProfile(null)
@@ -565,7 +572,7 @@ export default function Page() {
   }
 
   async function handleManagerApprove(expenseId: number) {
-    if (!user || !canApproveExpenses) return
+    if (!user) return
 
     setActionLoadingId(expenseId)
     setMessage("")
@@ -599,7 +606,7 @@ export default function Page() {
   }
 
   async function handleManagerReject(expenseId: number) {
-    if (!user || !canApproveExpenses) return
+    if (!user) return
 
     setActionLoadingId(expenseId)
     setMessage("")
@@ -816,7 +823,6 @@ export default function Page() {
     }))
 
     const ws = XLSX.utils.json_to_sheet(rows)
-
     const range = XLSX.utils.decode_range(ws["!ref"] || "A1")
 
     for (let row = 1; row <= range.e.r; row++) {
@@ -1087,69 +1093,76 @@ export default function Page() {
             {currentMonthExpenses.length === 0 ? (
               <div style={emptyStyle}>Bu ay kayıt yok.</div>
             ) : (
-              currentMonthExpenses.map((item) => (
-                <div key={item.id} style={expenseRowStyle}>
-                  {(isYonetici || isMuhasebe || isHiddenAdmin) && (
-                    <>
-                      <div style={expenseMetaStyle}>Personel: {item.full_name || "-"}</div>
-                      <div style={expenseMetaStyle}>Yönetici: {item.manager_name || "-"}</div>
-                      <div style={expenseMetaStyle}>Departman: {item.department_name || "-"}</div>
-                    </>
-                  )}
+              currentMonthExpenses.map((item) => {
+                const canApproveThisExpense =
+                  item.status === "submitted" &&
+                  item.user_id !== user.id &&
+                  (isHiddenAdmin || (isYonetici && item.manager_id === user.id))
 
-                  <div style={expenseTitleStyle}>{item.description}</div>
-                  <div style={expenseMetaStyle}>Tarih: {item.expense_date}</div>
-                  <div style={expenseMetaStyle}>Firma: {item.vendor_name || "-"}</div>
-                  <div style={expenseMetaStyle}>Kategori: {item.category || "-"}</div>
-                  <div style={expenseMetaStyle}>
-                    Tutar: {item.amount} {item.currency_code || "TRY"}
-                  </div>
-                  <div style={expenseMetaStyle}>
-                    Ödeme Yöntemi: {paymentMethodName(item.payment_method)}
-                  </div>
+                return (
+                  <div key={item.id} style={expenseRowStyle}>
+                    {(isYonetici || isMuhasebe || isHiddenAdmin) && (
+                      <>
+                        <div style={expenseMetaStyle}>Personel: {item.full_name || "-"}</div>
+                        <div style={expenseMetaStyle}>Yönetici: {item.manager_name || "-"}</div>
+                        <div style={expenseMetaStyle}>Departman: {item.department_name || "-"}</div>
+                      </>
+                    )}
 
-                  {item.last4_digits && (
-                    <div style={expenseMetaStyle}>Kart Son 4: {item.last4_digits}</div>
-                  )}
-
-                  <div style={expenseMetaStyle}>Durum: {statusName(item.status)}</div>
-
-                  {item.file_url && (
+                    <div style={expenseTitleStyle}>{item.description}</div>
+                    <div style={expenseMetaStyle}>Tarih: {item.expense_date}</div>
+                    <div style={expenseMetaStyle}>Firma: {item.vendor_name || "-"}</div>
+                    <div style={expenseMetaStyle}>Kategori: {item.category || "-"}</div>
                     <div style={expenseMetaStyle}>
-                      <a
-                        href={item.file_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={fileLinkStyle}
-                      >
-                        Ek Dosya: {item.file_name || "Görüntüle"}
-                      </a>
+                      Tutar: {item.amount} {item.currency_code || "TRY"}
                     </div>
-                  )}
-
-                  {canApproveExpenses && item.status === "submitted" && item.user_id !== user.id && (
-                    <div style={actionRowStyle}>
-                      <button
-                        type="button"
-                        onClick={() => handleManagerApprove(item.id)}
-                        disabled={actionLoadingId === item.id}
-                        style={approveButtonStyle}
-                      >
-                        {actionLoadingId === item.id ? "İşleniyor..." : "Onayla"}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleManagerReject(item.id)}
-                        disabled={actionLoadingId === item.id}
-                        style={rejectButtonStyle}
-                      >
-                        {actionLoadingId === item.id ? "İşleniyor..." : "Reddet"}
-                      </button>
+                    <div style={expenseMetaStyle}>
+                      Ödeme Yöntemi: {paymentMethodName(item.payment_method)}
                     </div>
-                  )}
-                </div>
-              ))
+
+                    {item.last4_digits && (
+                      <div style={expenseMetaStyle}>Kart Son 4: {item.last4_digits}</div>
+                    )}
+
+                    <div style={expenseMetaStyle}>Durum: {statusName(item.status)}</div>
+
+                    {item.file_url && (
+                      <div style={expenseMetaStyle}>
+                        <a
+                          href={item.file_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={fileLinkStyle}
+                        >
+                          Ek Dosya: {item.file_name || "Görüntüle"}
+                        </a>
+                      </div>
+                    )}
+
+                    {canApproveThisExpense && (
+                      <div style={actionRowStyle}>
+                        <button
+                          type="button"
+                          onClick={() => handleManagerApprove(item.id)}
+                          disabled={actionLoadingId === item.id}
+                          style={approveButtonStyle}
+                        >
+                          {actionLoadingId === item.id ? "İşleniyor..." : "Onayla"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleManagerReject(item.id)}
+                          disabled={actionLoadingId === item.id}
+                          style={rejectButtonStyle}
+                        >
+                          {actionLoadingId === item.id ? "İşleniyor..." : "Reddet"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })
             )}
           </div>
         </div>
@@ -1288,7 +1301,6 @@ export default function Page() {
                   .sort((a, b) => {
                     const aActive = a.is_active ? 1 : 0
                     const bActive = b.is_active ? 1 : 0
-
                     if (aActive !== bActive) return bActive - aActive
                     return (a.full_name || "").localeCompare(b.full_name || "", "tr")
                   })
@@ -1651,8 +1663,6 @@ const filterRowStyle: React.CSSProperties = {
   gap: "12px",
   marginBottom: "16px",
 }
-
-const filterItemStyle: React.CSSProperties = {}
 
 const messageStyle: React.CSSProperties = {
   marginTop: "18px",
