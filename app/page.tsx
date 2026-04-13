@@ -107,6 +107,7 @@ export default function Page() {
 
   const canManageUsers = isMuhasebe || isHiddenAdmin
   const canSeeAllExpenses = isHiddenAdmin
+
   const needsLast4 =
     paymentMethod === "company_card" || paymentMethod === "personal_card"
 
@@ -148,6 +149,7 @@ export default function Page() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
       const currentUser = session?.user ?? null
+
       if (!mounted) return
 
       if (currentUser) {
@@ -219,7 +221,8 @@ export default function Page() {
     } else if (activeProfile.role_id === 2) {
       expenseQuery = expenseQuery.eq("status", "approved")
     } else if (activeProfile.role_id === 3) {
-      // Yönetici tüm masrafları görebilir, ama sadece kendi personelini onaylayabilir.
+      // Yönetici tüm masrafları görebilir.
+      // Onay butonu sadece kendine bağlı personelde gösterilecek.
     } else if (activeProfile.role_id === 4) {
       // Admin her şeyi görür.
     }
@@ -1663,6 +1666,8 @@ const filterRowStyle: React.CSSProperties = {
   gap: "12px",
   marginBottom: "16px",
 }
+
+const filterItemStyle: React.CSSProperties = {}
 
 const messageStyle: React.CSSProperties = {
   marginTop: "18px",
