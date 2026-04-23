@@ -566,6 +566,21 @@ export default function Page() {
       setSelectedFile(null)
 
       setMessage(autoApproved ? "Masraf onaylı olarak kaydedildi." : "Masraf kaydedildi.")
+
+      if (!autoApproved) {
+        try {
+          await fetch("/api/notify-manager", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ expenseId: inserted.id }),
+          })
+        } catch (mailErr) {
+          console.error("Yönetici maili gönderilemedi:", mailErr)
+        }
+      }
+      
       await loadExpenses(user.id, profile)
     } catch (err: any) {
       setMessage(`Masraf kaydı sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
