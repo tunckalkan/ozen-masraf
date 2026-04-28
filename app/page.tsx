@@ -75,9 +75,8 @@ async function compressImage(file: File): Promise<File> {
     const img = new window.Image()
 
     const timer = window.setTimeout(() => {
-      console.warn("Resim küçültme zaman aşımı, orijinal dosya kullanılacak.")
       resolve(file)
-    }, 8000)
+    }, 5000)
 
     reader.onload = (e) => {
       img.src = e.target?.result as string
@@ -85,8 +84,8 @@ async function compressImage(file: File): Promise<File> {
 
     img.onload = () => {
       try {
-        const maxWidth = 900
-        const maxHeight = 900
+        const maxWidth = 700
+        const maxHeight = 700
 
         let width = img.width
         let height = img.height
@@ -127,9 +126,9 @@ async function compressImage(file: File): Promise<File> {
             resolve(compressedFile)
           },
           "image/jpeg",
-          0.55
+          0.45
         )
-      } catch (err) {
+      } catch {
         clearTimeout(timer)
         resolve(file)
       }
@@ -146,6 +145,24 @@ async function compressImage(file: File): Promise<File> {
     }
 
     reader.readAsDataURL(file)
+  })
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error("Dosya yükleme zaman aşımı"))
+    }, ms)
+
+    promise
+      .then((value) => {
+        clearTimeout(timer)
+        resolve(value)
+      })
+      .catch((err) => {
+        clearTimeout(timer)
+        reject(err)
+      })
   })
 }
 
@@ -637,35 +654,48 @@ export default function Page() {
       }
 
       if (selectedFile) {
-        const uploadFile = await compressImage(selectedFile)
+        try {
+          setMessage("Masraf kaydedildi, dosya yükleniyor...")
 
-        const safeName = `${Date.now()}_${uploadFile.name.replace(/\s+/g, "_")}`
-        const filePath = `expenses/${inserted.id}/${safeName}`
+          const uploadFile = await compressImage(selectedFile)
 
-        const { error: uploadError } = await supabase.storage
-          .from("expense-files")
-          .upload(filePath, uploadFile, {
-            cacheControl: "3600",
-            upsert: false,
-            contentType: uploadFile.type,
-          })
+          const safeName = `${Date.now()}_${uploadFile.name.replace(/\s+/g, "_")}`
+          const filePath = `expenses/${inserted.id}/${safeName}`
 
-        if (!uploadError) {
-          const { data: publicData } = supabase.storage
+          const uploadPromise = supabase.storage
             .from("expense-files")
-            .getPublicUrl(filePath)
+            .upload(filePath, uploadFile, {
+              cacheControl: "3600",
+              upsert: false,
+              contentType: uploadFile.type,
+            })
 
-          await supabase.from("expense_files").insert([
-            {
-              expense_id: inserted.id,
-              file_name: uploadFile.name,
-              file_path: filePath,
-              file_url: publicData.publicUrl,
-              uploaded_by: user.id,
-            },
-          ])
+          const { error: uploadError } = await withTimeout(uploadPromise, 12000)
+
+          if (!uploadError) {
+            const { data: publicData } = supabase.storage
+              .from("expense-files")
+              .getPublicUrl(filePath)
+
+            await supabase.from("expense_files").insert([
+              {
+                expense_id: inserted.id,
+                file_name: uploadFile.name,
+                file_path: filePath,
+                file_url: publicData.publicUrl,
+                uploaded_by: user.id,
+              },
+            ])
+          } else {
+            console.error("Dosya yükleme hatası:", uploadError.message)
+            setMessage("Masraf kaydedildi ama dosya yüklenemedi.")
+          }
+        } catch (uploadErr) {
+          console.error("Dosya yükleme zaman aşımı:", uploadErr)
+          setMessage("Masraf kaydedildi ama dosya yükleme uzun sürdüğü için geçildi.")
         }
       }
+
 
       setExpenseDate("")
       setVendorName("")
