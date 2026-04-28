@@ -62,6 +62,66 @@ type Department = {
   name: string
 }
 
+type Category = {
+  id: number
+  name: string
+}
+
+async function compressImage(file: File): Promise<File> {
+  if (!file.type.startsWith("image/")) return file
+
+  return new Promise((resolve) => {
+    const img = new window.Image()
+    const reader = new FileReader()
+
+    reader.onload = (e) => {
+      img.src = e.target?.result as string
+    }
+
+    img.onload = () => {
+      const maxWidth = 1200
+      const scale = Math.min(1, maxWidth / img.width)
+
+      const canvas = document.createElement("canvas")
+      canvas.width = Math.round(img.width * scale)
+      canvas.height = Math.round(img.height * scale)
+
+      const ctx = canvas.getContext("2d")
+      if (!ctx) {
+        resolve(file)
+        return
+      }
+
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            resolve(file)
+            return
+          }
+
+          const newFileName =
+            file.name.replace(/\.[^/.]+$/, "") + "_kucuk.jpg"
+
+          const compressedFile = new File([blob], newFileName, {
+            type: "image/jpeg",
+          })
+
+          resolve(compressedFile)
+        },
+        "image/jpeg",
+        0.7
+      )
+    }
+
+    img.onerror = () => resolve(file)
+    reader.onerror = () => resolve(file)
+
+    reader.readAsDataURL(file)
+  })
+}
+
 export default function Page() {
   const [booting, setBooting] = useState(true)
   const [user, setUser] = useState<any>(null)
@@ -90,6 +150,7 @@ export default function Page() {
 
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
   const [usersLoading, setUsersLoading] = useState(false)
   const [userActionMessage, setUserActionMessage] = useState("")
 
@@ -116,6 +177,8 @@ export default function Page() {
 
     async function init() {
       try {
+        await loadCategories()
+
         const {
           data: { user: currentUser },
         } = await supabase.auth.getUser()
@@ -152,6 +215,8 @@ export default function Page() {
 
       if (!mounted) return
 
+      await loadCategories()
+
       if (currentUser) {
         setUser(currentUser)
 
@@ -181,6 +246,24 @@ export default function Page() {
       subscription.unsubscribe()
     }
   }, [])
+
+  async function loadCategories() {
+    const { data, error } = await supabase
+      .from("categories")
+      .select("id, name")
+      .eq("is_active", true)
+      .order("name", { ascending: true })
+
+    if (!error) {
+      setCategories(data || [])
+
+      if ((!category || category === "Diğer") && data && data.length > 0) {
+        setCategory(data[0].name)
+      }
+    } else {
+      console.error("Kategori alınamadı:", error.message)
+    }
+  }
 
   async function loadProfile(userId: string): Promise<Profile | null> {
     const { data, error } = await supabase
@@ -527,15 +610,17 @@ export default function Page() {
       }
 
       if (selectedFile) {
-        const safeName = `${Date.now()}_${selectedFile.name.replace(/\s+/g, "_")}`
+        const uploadFile = await compressImage(selectedFile)
+
+        const safeName = `${Date.now()}_${uploadFile.name.replace(/\s+/g, "_")}`
         const filePath = `expenses/${inserted.id}/${safeName}`
 
         const { error: uploadError } = await supabase.storage
           .from("expense-files")
-          .upload(filePath, selectedFile, {
+          .upload(filePath, uploadFile, {
             cacheControl: "3600",
             upsert: false,
-            contentType: selectedFile.type,
+            contentType: uploadFile.type,
           })
 
         if (!uploadError) {
@@ -546,7 +631,7 @@ export default function Page() {
           await supabase.from("expense_files").insert([
             {
               expense_id: inserted.id,
-              file_name: selectedFile.name,
+              file_name: uploadFile.name,
               file_path: filePath,
               file_url: publicData.publicUrl,
               uploaded_by: user.id,
@@ -560,7 +645,7 @@ export default function Page() {
       setDescription("")
       setAmount("")
       setCurrencyCode("TRY")
-      setCategory("Diğer")
+      setCategory(categories.length > 0 ? categories[0].name : "Diğer")
       setPaymentMethod("personal_card")
       setLast4Digits("")
       setSelectedFile(null)
@@ -580,7 +665,7 @@ export default function Page() {
           console.error("Yönetici maili gönderilemedi:", mailErr)
         }
       }
-      
+
       await loadExpenses(user.id, profile)
     } catch (err: any) {
       setMessage(`Masraf kaydı sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
@@ -1047,16 +1132,15 @@ export default function Page() {
                   onChange={(e) => setCategory(e.target.value)}
                   style={inputStyle}
                 >
-                  <option value="Konaklama">Konaklama</option>
-                  <option value="Ulaşım">Ulaşım</option>
-                  <option value="Yakıt">Yakıt</option>
-                  <option value="Satınalma">Satınalma</option>
-                  <option value="Yemek">Yemek</option>
-                  <option value="Temsil / Ağırlama">Temsil / Ağırlama</option>
-                  <option value="Ofis Gideri">Ofis Gideri</option>
-                  <option value="Kargo / Lojistik">Kargo / Lojistik</option>
-                  <option value="Bakım / Onarım">Bakım / Onarım</option>
-                  <option value="Diğer">Diğer</option>
+                  {categories.length === 0 ? (
+                    <option value="Diğer">Diğer</option>
+                  ) : (
+                    categories.map((c) => (
+                      <option key={c.id} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 
