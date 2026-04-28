@@ -71,52 +71,79 @@ async function compressImage(file: File): Promise<File> {
   if (!file.type.startsWith("image/")) return file
 
   return new Promise((resolve) => {
-    const img = new window.Image()
     const reader = new FileReader()
+    const img = new window.Image()
+
+    const timer = window.setTimeout(() => {
+      console.warn("Resim küçültme zaman aşımı, orijinal dosya kullanılacak.")
+      resolve(file)
+    }, 8000)
 
     reader.onload = (e) => {
       img.src = e.target?.result as string
     }
 
     img.onload = () => {
-      const maxWidth = 1200
-      const scale = Math.min(1, maxWidth / img.width)
+      try {
+        const maxWidth = 900
+        const maxHeight = 900
 
-      const canvas = document.createElement("canvas")
-      canvas.width = Math.round(img.width * scale)
-      canvas.height = Math.round(img.height * scale)
+        let width = img.width
+        let height = img.height
 
-      const ctx = canvas.getContext("2d")
-      if (!ctx) {
+        const ratio = Math.min(maxWidth / width, maxHeight / height, 1)
+
+        width = Math.round(width * ratio)
+        height = Math.round(height * ratio)
+
+        const canvas = document.createElement("canvas")
+        canvas.width = width
+        canvas.height = height
+
+        const ctx = canvas.getContext("2d")
+        if (!ctx) {
+          clearTimeout(timer)
+          resolve(file)
+          return
+        }
+
+        ctx.drawImage(img, 0, 0, width, height)
+
+        canvas.toBlob(
+          (blob) => {
+            clearTimeout(timer)
+
+            if (!blob) {
+              resolve(file)
+              return
+            }
+
+            const compressedFile = new File(
+              [blob],
+              file.name.replace(/\.[^/.]+$/, "") + "_kucuk.jpg",
+              { type: "image/jpeg" }
+            )
+
+            resolve(compressedFile)
+          },
+          "image/jpeg",
+          0.55
+        )
+      } catch (err) {
+        clearTimeout(timer)
         resolve(file)
-        return
       }
-
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-
-      canvas.toBlob(
-        (blob) => {
-          if (!blob) {
-            resolve(file)
-            return
-          }
-
-          const newFileName =
-            file.name.replace(/\.[^/.]+$/, "") + "_kucuk.jpg"
-
-          const compressedFile = new File([blob], newFileName, {
-            type: "image/jpeg",
-          })
-
-          resolve(compressedFile)
-        },
-        "image/jpeg",
-        0.7
-      )
     }
 
-    img.onerror = () => resolve(file)
-    reader.onerror = () => resolve(file)
+    img.onerror = () => {
+      clearTimeout(timer)
+      resolve(file)
+    }
+
+    reader.onerror = () => {
+      clearTimeout(timer)
+      resolve(file)
+    }
 
     reader.readAsDataURL(file)
   })
@@ -651,20 +678,6 @@ export default function Page() {
       setSelectedFile(null)
 
       setMessage(autoApproved ? "Masraf onaylı olarak kaydedildi." : "Masraf kaydedildi.")
-
-      if (!autoApproved) {
-        try {
-          await fetch("/api/notify-manager", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ expenseId: inserted.id }),
-          })
-        } catch (mailErr) {
-          console.error("Yönetici maili gönderilemedi:", mailErr)
-        }
-      }
 
       await loadExpenses(user.id, profile)
     } catch (err: any) {
