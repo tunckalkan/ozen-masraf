@@ -579,23 +579,25 @@ export default function Page() {
   }
 
   async function handleLogout() {
-    setLoading(true)
+    setMassage("Çıkış Yapılıyor....")
     setMessage("")
 
     try {
       await supabase.auth.signOut()
-    } catch {
-      // noop
-    } finally {
+    } catch (err) {
+      console.error("Çıkış Hatası:",err)
+    } 
+
       setUser(null)
       setProfile(null)
       setExpenses([])
       setManagedUsers([])
       setDepartments([])
-      setLoading(false)
       setMessage("Çıkış yapıldı.")
+      setLoading(false)
+
+      window.location.reload()
     }
-  }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
@@ -1068,7 +1070,8 @@ export default function Page() {
             <div style={roleStyle}>Rol: {roleName(profile.role_id)}</div>
           </div>
 
-          <button onClick={handleLogout} disabled={loading} style={logoutButtonStyle}>
+          
+          <button type="button" onClick={handleLogout} style={logoutButtonStyle}>
             Çıkış Yap
           </button>
         </div>
