@@ -171,6 +171,20 @@ export default function Page() {
   const [user, setUser] = useState<any>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
 
+  function clearSupabaseStorage() {
+  Object.keys(window.localStorage).forEach((key) => {
+    if (key.includes("supabase") || key.includes("sb-")) {
+      window.localStorage.removeItem(key)
+    }
+  })
+
+  Object.keys(window.sessionStorage).forEach((key) => {
+    if (key.includes("supabase") || key.includes("sb-")) {
+      window.sessionStorage.removeItem(key)
+    }
+  })
+}
+
   const [email, setEmail] = useState("test@ozeniplik.com")
   const [password, setPassword] = useState("123456")
 
@@ -1090,8 +1104,10 @@ export default function Page() {
           
           <button
             type="button"
-            onClick={handleLogout}
-            onTouchStart={handleLogout}
+            onClick={() => {
+              clearSupabaseStorage()
+              window.location.href = "/?logout=1"
+            }}
             style={logoutButtonStyle}
           >
             Çıkış Yap
