@@ -579,25 +579,35 @@ export default function Page() {
   }
 
   async function handleLogout() {
-    setMessage("Çıkış Yapılıyor....")
-    setMessage("")
+  try {
+    setMessage("Çıkış yapılıyor...")
+    setLoading(false)
+    setActionLoadingId(null)
 
-    try {
-      await supabase.auth.signOut()
-    } catch (err) {
-      console.error("Çıkış Hatası:",err)
-    } 
+    await supabase.auth.signOut()
 
-      setUser(null)
-      setProfile(null)
-      setExpenses([])
-      setManagedUsers([])
-      setDepartments([])
-      setMessage("Çıkış yapıldı.")
-      setLoading(false)
+    setUser(null)
+    setProfile(null)
+    setExpenses([])
+    setManagedUsers([])
+    setDepartments([])
+    setMessage("Çıkış yapıldı.")
 
-      window.location.reload()
-    }
+    window.location.href = "/"
+  } catch (err) {
+    console.error("Çıkış hatası:", err)
+
+    setUser(null)
+    setProfile(null)
+    setExpenses([])
+    setManagedUsers([])
+    setDepartments([])
+    setLoading(false)
+    setActionLoadingId(null)
+
+    window.location.href = "/"
+  }
+}
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
@@ -746,6 +756,7 @@ export default function Page() {
 
       await loadExpenses(user.id, profile)
       setMessage("Masraf onaylandı.")
+      setActionLoadingId(null)  //
     } catch (err: any) {
       setMessage(`Onay sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
@@ -777,6 +788,7 @@ export default function Page() {
 
       await loadExpenses(user.id, profile)
       setMessage("Masraf reddedildi.")
+      setActionLoadingId(null)
     } catch (err: any) {
       setMessage(`Red sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
