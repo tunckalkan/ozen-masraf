@@ -579,7 +579,7 @@ export default function Page() {
   }
 
   async function handleLogout() {
-    setMassage("Çıkış Yapılıyor....")
+    setMessage("Çıkış Yapılıyor....")
     setMessage("")
 
     try {
