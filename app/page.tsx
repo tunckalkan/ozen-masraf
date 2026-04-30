@@ -584,7 +584,20 @@ export default function Page() {
     setLoading(false)
     setActionLoadingId(null)
 
-    await supabase.auth.signOut()
+    await supabase.auth.signOut({ scope: "local" })
+
+    // Supabase local kayıtlarını zorla temizle
+    Object.keys(window.localStorage).forEach((key) => {
+      if (key.includes("supabase") || key.includes("sb-")) {
+        window.localStorage.removeItem(key)
+      }
+    })
+
+    Object.keys(window.sessionStorage).forEach((key) => {
+      if (key.includes("supabase") || key.includes("sb-")) {
+        window.sessionStorage.removeItem(key)
+      }
+    })
 
     setUser(null)
     setProfile(null)
@@ -593,22 +606,14 @@ export default function Page() {
     setDepartments([])
     setMessage("Çıkış yapıldı.")
 
-    window.location.href = "/"
+    window.location.replace("/?logout=" + Date.now())
   } catch (err) {
     console.error("Çıkış hatası:", err)
 
-    setUser(null)
-    setProfile(null)
-    setExpenses([])
-    setManagedUsers([])
-    setDepartments([])
-    setLoading(false)
-    setActionLoadingId(null)
-
-    window.location.href = "/"
+    window.location.replace("/?logout=" + Date.now())
   }
 }
-
+  
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
     setMessage("")
@@ -1083,7 +1088,12 @@ export default function Page() {
           </div>
 
           
-          <button type="button" onClick={handleLogout} style={logoutButtonStyle}>
+          <button
+            type="button"
+            onClick={handleLogout}
+            onTouchStart={handleLogout}
+            style={logoutButtonStyle}
+          >
             Çıkış Yap
           </button>
         </div>
