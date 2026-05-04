@@ -592,15 +592,11 @@ export default function Page() {
     }
   }
 
-  async function handleLogout() {
+  function handleLogout() {
   try {
-    setMessage("Çıkış yapılıyor...")
     setLoading(false)
     setActionLoadingId(null)
 
-    await supabase.auth.signOut({ scope: "local" })
-
-    // Supabase local kayıtlarını zorla temizle
     Object.keys(window.localStorage).forEach((key) => {
       if (key.includes("supabase") || key.includes("sb-")) {
         window.localStorage.removeItem(key)
@@ -612,21 +608,13 @@ export default function Page() {
         window.sessionStorage.removeItem(key)
       }
     })
-
-    setUser(null)
-    setProfile(null)
-    setExpenses([])
-    setManagedUsers([])
-    setDepartments([])
-    setMessage("Çıkış yapıldı.")
-
-    window.location.replace("/?logout=" + Date.now())
   } catch (err) {
-    console.error("Çıkış hatası:", err)
-
-    window.location.replace("/?logout=" + Date.now())
+    console.error("Çıkış temizleme hatası:", err)
   }
+
+  window.location.href = "/?logout=1"
 }
+
   
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
