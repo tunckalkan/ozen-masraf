@@ -705,6 +705,8 @@ export default function Page() {
           const extension =
             uploadFile.name.split(".").pop()?.toLowerCase() || "jpg"
 
+	  const extension = uploadFile.name.split(".").pop()?.toLowerCase() || "jpg"
+
           const safeName =
             `${Date.now()}_${Math.random()
               .toString(36)
@@ -715,7 +717,7 @@ export default function Page() {
             .from("expense-files")
             .upload(filePath, uploadFile, {
               cacheControl: "3600",
-              upsert: false,
+              upsert: true,
               contentType: uploadFile.type || "application/octet-stream",
             })
 
