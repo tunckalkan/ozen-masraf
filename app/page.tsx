@@ -702,7 +702,13 @@ export default function Page() {
 
           const uploadFile = await compressImage(selectedFile)
 
-          const safeName = `${Date.now()}_${uploadFile.name.replace(/\s+/g, "_")}`
+          const extension =
+            uploadFile.name.split(".").pop()?.toLowerCase() || "jpg"
+
+          const safeName =
+            `${Date.now()}_${Math.random()
+              .toString(36)
+              .substring(2, 8)}.${extension}`
           const filePath = `expenses/${inserted.id}/${safeName}`
 
           const uploadPromise = supabase.storage
@@ -713,7 +719,7 @@ export default function Page() {
               contentType: uploadFile.type || "application/octet-stream",
             })
 
-          const { error: uploadError } = await withTimeout(uploadPromise, 30000)
+          const { error: uploadError } = await withTimeout(uploadPromise, 90000)
 
           if (!uploadError) {
             const { data: publicData } = supabase.storage
@@ -1242,12 +1248,24 @@ export default function Page() {
 
               <div style={fieldWrapStyle}>
                 <label style={labelStyle}>Fiş / Fatura</label>
-                <input
-                  id="expense-file"
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/*,.pdf"
-                  capture="environment"
-                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                
+                  <input
+                    id="expense-file"
+                    type="file"
+                    accept="image/*,.pdf"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null
+
+                      if (file) {
+                        console.log("Seçilen dosya:", {
+                        name: file.name,
+                        type: file.type,
+                        size: file.size,
+                      })
+                    }
+
+                    setSelectedFile(file)
+                  }}
                   style={inputStyle}
                 />
               </div>
