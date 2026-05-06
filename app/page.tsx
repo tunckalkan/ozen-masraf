@@ -705,8 +705,6 @@ export default function Page() {
           const extension =
             uploadFile.name.split(".").pop()?.toLowerCase() || "jpg"
 
-	  const extension = uploadFile.name.split(".").pop()?.toLowerCase() || "jpg"
-
           const safeName =
             `${Date.now()}_${Math.random()
               .toString(36)
