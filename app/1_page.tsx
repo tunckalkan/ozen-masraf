@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import { useEffect, useMemo, useState } from "react"
 import Image from "next/image"
@@ -67,106 +67,89 @@ type Category = {
   name: string
 }
 
-function isImageFile(file: File): boolean {
-  const type = (file.type || "").toLowerCase()
-  const name = (file.name || "").toLowerCase()
-
-  return (
-    type.startsWith("image/") ||
-    name.endsWith(".jpg") ||
-    name.endsWith(".jpeg") ||
-    name.endsWith(".png") ||
-    name.endsWith(".webp") ||
-    name.endsWith(".bmp")
-  )
-}
-
 async function compressImage(file: File): Promise<File> {
-  if (!isImageFile(file)) return file
+  if (!file.type.startsWith("image/")) return file
 
+  const ua = navigator.userAgent.toLowerCase()
+  const isAndroid = ua.includes("android")
+
+  if (isAndroid) {
+    return file
+  }
+   
   return new Promise((resolve) => {
     const reader = new FileReader()
     const img = new window.Image()
-    let finished = false
-
-    function finish(result: File) {
-      if (finished) return
-      finished = true
-      clearTimeout(timer)
-      resolve(result)
-    }
 
     const timer = window.setTimeout(() => {
-      finish(file)
-    }, 10000)
+      resolve(file)
+    }, 5000)
 
     reader.onload = (e) => {
-      const result = e.target?.result
-
-      if (typeof result !== "string") {
-        finish(file)
-        return
-      }
-
-      img.src = result
+      img.src = e.target?.result as string
     }
 
     img.onload = () => {
       try {
-        const maxWidth = 1200
-        const maxHeight = 1200
+        const maxWidth = 700
+        const maxHeight = 700
 
         let width = img.width
         let height = img.height
 
-        if (!width || !height) {
-          finish(file)
-          return
-        }
-
         const ratio = Math.min(maxWidth / width, maxHeight / height, 1)
 
-        width = Math.max(1, Math.round(width * ratio))
-        height = Math.max(1, Math.round(height * ratio))
+        width = Math.round(width * ratio)
+        height = Math.round(height * ratio)
 
         const canvas = document.createElement("canvas")
         canvas.width = width
         canvas.height = height
 
-        const ctx = canvas.getContext("2d", { alpha: false })
+        const ctx = canvas.getContext("2d")
         if (!ctx) {
-          finish(file)
+          clearTimeout(timer)
+          resolve(file)
           return
         }
 
-        ctx.fillStyle = "#ffffff"
-        ctx.fillRect(0, 0, width, height)
         ctx.drawImage(img, 0, 0, width, height)
 
         canvas.toBlob(
           (blob) => {
+            clearTimeout(timer)
+
             if (!blob) {
-              finish(file)
+              resolve(file)
               return
             }
 
-            const jpgFile = new File([blob], `fis_${Date.now()}.jpg`, {
-              type: "image/jpeg",
-            })
+            const compressedFile = new File(
+              [blob],
+              file.name.replace(/\.[^/.]+$/, "") + "_kucuk.jpg",
+              { type: "image/jpeg" }
+            )
 
-            finish(jpgFile)
+            resolve(compressedFile)
           },
           "image/jpeg",
-          0.72
+          0.45
         )
-      } catch (err) {
-        console.error("Resim küçültme hatası:", err)
-        finish(file)
+      } catch {
+        clearTimeout(timer)
+        resolve(file)
       }
     }
 
-    img.onerror = () => finish(file)
-    reader.onerror = () => finish(file)
+    img.onerror = () => {
+      clearTimeout(timer)
+      resolve(file)
+    }
+
+    reader.onerror = () => {
+      clearTimeout(timer)
+      resolve(file)
+    }
 
     reader.readAsDataURL(file)
   })
@@ -639,7 +622,7 @@ export default function Page() {
   window.location.href = "/?logout=1"
 }
 
- 
+  
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
     setMessage("")
@@ -710,10 +693,10 @@ export default function Page() {
             .upload(filePath, uploadFile, {
               cacheControl: "3600",
               upsert: false,
-              contentType: uploadFile.type || "application/octet-stream",
+              contentType: uploadFile.type,
             })
 
-          const { error: uploadError } = await withTimeout(uploadPromise, 30000)
+          const { error: uploadError } = await withTimeout(uploadPromise, 12000)
 
           if (!uploadError) {
             const { data: publicData } = supabase.storage
@@ -1113,7 +1096,7 @@ export default function Page() {
             <div style={roleStyle}>Rol: {roleName(profile.role_id)}</div>
           </div>
 
-         
+          
           <button
             type="button"
             onClick={() => {
@@ -1245,8 +1228,7 @@ export default function Page() {
                 <input
                   id="expense-file"
                   type="file"
-                  accept="image/jpeg,image/png,image/webp,image/*,.pdf"
-                  capture="environment"
+                  accept="image/*,.pdf"
                   onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
                   style={inputStyle}
                 />
