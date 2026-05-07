@@ -1202,21 +1202,49 @@ export default function Page() {
                 </select>
               </div>
 
-              <div style={fieldWrapStyle}>
-                <label style={labelStyle}>Fiş / Fatura</label>
-                
-                  <input
-                    id="expense-file"
-                    type="file"
-                    accept="image/jpeg,image/png,application/pdf"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0] || null
-                      setSelectedFile(file)
-                      setMessage(file ? "Dosya seçildi. Test için şimdilik sadece masraf kaydedilecek." : "")
-                    }}
-                  style={inputStyle}
-                />
-              </div>
+         <div style={fieldWrapStyle}>
+  <label style={labelStyle}>Fiş / Fatura</label>
+
+  <input
+    id="expense-file"
+    type="file"
+    accept="image/*,.pdf"
+    capture="environment"
+    style={inputStyle}
+    onChange={(e) => {
+      const files = e.target.files
+
+      if (!files || files.length === 0) {
+        setSelectedFile(null)
+        setMessage("")
+        return
+      }
+
+      const file = files[0]
+
+      // Android bazı cihazlarda type boş gelebiliyor
+      const isImage =
+        file.type.startsWith("image/") ||
+        /\.(jpg|jpeg|png|webp)$/i.test(file.name)
+
+      const isPdf =
+        file.type === "application/pdf" ||
+        /\.pdf$/i.test(file.name)
+
+      if (!isImage && !isPdf) {
+        setMessage("Sadece resim veya PDF yükleyebilirsiniz.")
+        setSelectedFile(null)
+
+        // aynı dosyayı tekrar seçebilsin
+        e.target.value = ""
+        return
+      }
+
+      setSelectedFile(file)
+      setMessage("Dosya seçildi.")
+    }}
+  />
+</div>
 
               <button
                 type="button"
