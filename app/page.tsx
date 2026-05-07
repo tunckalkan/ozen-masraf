@@ -642,6 +642,10 @@ export default function Page() {
  
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
+
+    alert("HANDLE SAVE CALISTI") 
+    console.log("HANDLE SAVE CALISTI")
+  
     setMessage("")
 
     if (!user || !profile) {
