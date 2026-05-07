@@ -1092,7 +1092,7 @@ export default function Page() {
           <div style={cardStyle}>
             <h2 style={sectionTitleStyle}>Yeni Masraf</h2>
 
-            <form onSubmit={handleSave}>
+            <div>
               <div style={fieldWrapStyle}>
                 <label style={labelStyle}>Tarih</label>
                 <input
@@ -1208,11 +1208,11 @@ export default function Page() {
                   <input
                     id="expense-file"
                     type="file"
-                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                    accept="image/jpeg,image/png,application/pdf"
                     onChange={(e) => {
                       const file = e.target.files?.[0] || null
                       setSelectedFile(file)
-                      setMessage(file ? "Dosya secildi. Test için şimdilik sadece masraf kaydedilecek." :"")
+                      setMessage(file ? "Dosya seçildi. Test için şimdilik sadece masraf kaydedilecek." : "")
                     }}
                   style={inputStyle}
                 />
