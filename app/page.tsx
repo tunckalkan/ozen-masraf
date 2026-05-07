@@ -701,55 +701,6 @@ export default function Page() {
         return
       }
 
-      if (selectedFile) {
-        try {
-          setMessage("Masraf kaydedildi, dosya yükleniyor...")
-
-          const uploadFile = selectedFile
-
-          const extension =
-            uploadFile.name.split(".").pop()?.toLowerCase() || "jpg"
-
-          const safeName =
-            `${Date.now()}_${Math.random()
-              .toString(36)
-              .substring(2, 8)}.${extension}`
-          const filePath = `expenses/${inserted.id}/${safeName}`
-
-          const uploadPromise = supabase.storage
-            .from("expense-files")
-            .upload(filePath, uploadFile, {
-              cacheControl: "3600",
-              upsert: true,
-              contentType: uploadFile.type || "application/octet-stream",
-            })
-
-          const { error: uploadError } = await withTimeout(uploadPromise, 30000)
-
-          if (!uploadError) {
-            const { data: publicData } = supabase.storage
-              .from("expense-files")
-              .getPublicUrl(filePath)
-
-            await supabase.from("expense_files").insert([
-              {
-                expense_id: inserted.id,
-                file_name: uploadFile.name,
-                file_path: filePath,
-                file_url: publicData.publicUrl,
-                uploaded_by: user.id,
-              },
-            ])
-          } else {
-            console.error("Dosya yükleme hatası:", uploadError.message)
-            setMessage("Masraf kaydedildi ama dosya yüklenemedi.")
-          }
-        } catch (uploadErr) {
-          console.error("Dosya yükleme zaman aşımı:", uploadErr)
-          setMessage("Masraf kaydedildi ama dosya yükleme uzun sürdüğü için geçildi.")
-        }
-      }
-
 
       setExpenseDate("")
       setVendorName("")
@@ -1260,23 +1211,8 @@ export default function Page() {
                     accept="image/jpeg,image/png,image/webp,application/pdf"
                     onChange={(e) => {
                       const file = e.target.files?.[0] || null
-
-                      if (file && file.size > 12 * 1024 * 1024) {
-                        setSelectedFile(null)
-                        setMessage("Dosya çok büyük. Lütfen 12 MB altında fotoğraf yükleyin.")
-                        e.target.value = ""
-                        return
-                      }
-
-                      if (file) {
-                        console.log("Seçilen dosya:", {
-                          name: file.name,
-                          type: file.type,
-                          size: file.size,
-                        })
-                      }
-
                       setSelectedFile(file)
+                      setMessage(file ? "Dosya secildi. Test için şimdilik sadece masraf kaydedilecek." :"")
                     }}
                   style={inputStyle}
                 />
