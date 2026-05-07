@@ -659,6 +659,11 @@ export default function Page() {
       return
     }
 
+    if (selectedFile && selectedFile.size > 12 * 1024 * 1024) {
+      setMessage("Dosya çok büyük. Lütfen 12 MB altında fotoğraf yükleyin.")
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -700,7 +705,7 @@ export default function Page() {
         try {
           setMessage("Masraf kaydedildi, dosya yükleniyor...")
 
-          const uploadFile = await compressImage(selectedFile)
+          const uploadFile = selectedFile
 
           const extension =
             uploadFile.name.split(".").pop()?.toLowerCase() || "jpg"
@@ -719,7 +724,7 @@ export default function Page() {
               contentType: uploadFile.type || "application/octet-stream",
             })
 
-          const { error: uploadError } = await withTimeout(uploadPromise, 90000)
+          const { error: uploadError } = await withTimeout(uploadPromise, 30000)
 
           if (!uploadError) {
             const { data: publicData } = supabase.storage
@@ -1252,20 +1257,27 @@ export default function Page() {
                   <input
                     id="expense-file"
                     type="file"
-                    accept="image/*,.pdf"
+                    accept="image/jpeg,image/png,image/webp,application/pdf"
                     onChange={(e) => {
                       const file = e.target.files?.[0] || null
 
+                      if (file && file.size > 12 * 1024 * 1024) {
+                        setSelectedFile(null)
+                        setMessage("Dosya çok büyük. Lütfen 12 MB altında fotoğraf yükleyin.")
+                        e.target.value = ""
+                        return
+                      }
+
                       if (file) {
                         console.log("Seçilen dosya:", {
-                        name: file.name,
-                        type: file.type,
-                        size: file.size,
-                      })
-                    }
+                          name: file.name,
+                          type: file.type,
+                          size: file.size,
+                        })
+                      }
 
-                    setSelectedFile(file)
-                  }}
+                      setSelectedFile(file)
+                    }}
                   style={inputStyle}
                 />
               </div>
