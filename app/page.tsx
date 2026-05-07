@@ -640,11 +640,7 @@ export default function Page() {
 }
 
  
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault()
-
-    alert("HANDLE SAVE CALISTI") 
-    console.log("HANDLE SAVE CALISTI")
+  async function handleSave() {
   
     setMessage("")
 
@@ -1222,10 +1218,15 @@ export default function Page() {
                 />
               </div>
 
-              <button type="submit" disabled={loading} style={primaryButtonStyle}>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={handleSave}
+                style={primaryButtonStyle}
+              >
                 {loading ? "Kaydediliyor..." : "Kaydet"}
               </button>
-            </form>
+            </div>
           </div>
 
           <div style={cardStyle}>
