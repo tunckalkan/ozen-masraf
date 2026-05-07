@@ -220,7 +220,6 @@ export default function Page() {
   const [category, setCategory] = useState("Diğer")
   const [paymentMethod, setPaymentMethod] = useState("personal_card")
   const [last4Digits, setLast4Digits] = useState("")
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
@@ -659,11 +658,6 @@ export default function Page() {
       return
     }
 
-    if (selectedFile && selectedFile.size > 12 * 1024 * 1024) {
-      setMessage("Dosya çok büyük. Lütfen 12 MB altında fotoğraf yükleyin.")
-      return
-    }
-
     setLoading(true)
 
     try {
@@ -710,7 +704,6 @@ export default function Page() {
       setCategory(categories.length > 0 ? categories[0].name : "Diğer")
       setPaymentMethod("personal_card")
       setLast4Digits("")
-      setSelectedFile(null)
 
       setMessage(autoApproved ? "Masraf onaylı olarak kaydedildi." : "Masraf kaydedildi.")
 
@@ -1202,49 +1195,20 @@ export default function Page() {
                 </select>
               </div>
 
-         <div style={fieldWrapStyle}>
-  <label style={labelStyle}>Fiş / Fatura</label>
-
-  <input
-    id="expense-file"
-    type="file"
-    accept="image/*,.pdf"
-    capture="environment"
-    style={inputStyle}
-    onChange={(e) => {
-      const files = e.target.files
-
-      if (!files || files.length === 0) {
-        setSelectedFile(null)
-        setMessage("")
-        return
-      }
-
-      const file = files[0]
-
-      // Android bazı cihazlarda type boş gelebiliyor
-      const isImage =
-        file.type.startsWith("image/") ||
-        /\.(jpg|jpeg|png|webp)$/i.test(file.name)
-
-      const isPdf =
-        file.type === "application/pdf" ||
-        /\.pdf$/i.test(file.name)
-
-      if (!isImage && !isPdf) {
-        setMessage("Sadece resim veya PDF yükleyebilirsiniz.")
-        setSelectedFile(null)
-
-        // aynı dosyayı tekrar seçebilsin
-        e.target.value = ""
-        return
-      }
-
-      setSelectedFile(file)
-      setMessage("Dosya seçildi.")
-    }}
-  />
-</div>
+              <div style={fieldWrapStyle}>
+                <label style={labelStyle}>Fiş / Fatura</label>
+                
+                  <input
+                    id="expense-file"
+                    type="file"
+                    accept="image/jpeg,image/png,application/pdf"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null
+                      setMessage(file ? "Dosya seçildi. Şimdilik sadece masraf kaydedilecek." : "")
+                    }}
+                  style={inputStyle}
+                />
+              </div>
 
               <button
                 type="button"
