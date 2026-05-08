@@ -220,6 +220,7 @@ export default function Page() {
   const [category, setCategory] = useState("Diğer")
   const [paymentMethod, setPaymentMethod] = useState("personal_card")
   const [last4Digits, setLast4Digits] = useState("")
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
@@ -639,6 +640,54 @@ export default function Page() {
 }
 
  
+  async function uploadExpenseFileViaApi(expenseId: number, file: File): Promise<boolean> {
+    if (!user) return false
+
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => controller.abort(), 45000)
+
+    try {
+      const formData = new FormData()
+      formData.append("file", file)
+      formData.append("expenseId", String(expenseId))
+      formData.append("userId", user.id)
+
+      const res = await fetch("/api/upload-expense-file", {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      })
+
+      const text = await res.text()
+      let json: any = {}
+
+      try {
+        json = text ? JSON.parse(text) : {}
+      } catch {
+        json = { error: text }
+      }
+
+      if (!res.ok) {
+        console.error("Upload API hata:", json?.error || res.statusText)
+        setMessage(`Masraf kaydedildi ama dosya yüklenemedi: ${json?.error || res.statusText}`)
+        return false
+      }
+
+      return true
+    } catch (err: any) {
+      console.error("Upload API bağlantı/zaman aşımı:", err)
+      const msg =
+        err?.name === "AbortError"
+          ? "Dosya yükleme 45 saniyeyi geçti."
+          : err?.message || "Dosya yükleme hatası."
+
+      setMessage(`Masraf kaydedildi ama dosya yüklenemedi: ${msg}`)
+      return false
+    } finally {
+      window.clearTimeout(timer)
+    }
+  }
+
   async function handleSave() {
   
     setMessage("")
@@ -655,6 +704,11 @@ export default function Page() {
 
     if (needsLast4 && last4Digits.length !== 4) {
       setMessage("Kartın son 4 hanesini giriniz.")
+      return
+    }
+
+    if (selectedFile && selectedFile.size > 12 * 1024 * 1024) {
+      setMessage("Dosya çok büyük. Lütfen 12 MB altında JPG, PNG veya PDF yükleyin.")
       return
     }
 
@@ -695,6 +749,11 @@ export default function Page() {
         return
       }
 
+      let fileUploaded = false
+      if (selectedFile) {
+        setMessage("Masraf kaydedildi, dosya yükleniyor...")
+        fileUploaded = await uploadExpenseFileViaApi(inserted.id, selectedFile)
+      }
 
       setExpenseDate("")
       setVendorName("")
@@ -704,8 +763,17 @@ export default function Page() {
       setCategory(categories.length > 0 ? categories[0].name : "Diğer")
       setPaymentMethod("personal_card")
       setLast4Digits("")
+      setSelectedFile(null)
 
-      setMessage(autoApproved ? "Masraf onaylı olarak kaydedildi." : "Masraf kaydedildi.")
+      if (selectedFile) {
+        setMessage(
+          fileUploaded
+            ? "Masraf ve dosya başarıyla kaydedildi."
+            : "Masraf kaydedildi ama dosya yüklenemedi."
+        )
+      } else {
+        setMessage(autoApproved ? "Masraf onaylı olarak kaydedildi." : "Masraf kaydedildi.")
+      }
 
       await loadExpenses(user.id, profile)
     } catch (err: any) {
@@ -1204,10 +1272,19 @@ export default function Page() {
                     accept="image/jpeg,image/png,application/pdf"
                     onChange={(e) => {
                       const file = e.target.files?.[0] || null
-                      setMessage(file ? "Dosya seçildi. Şimdilik sadece masraf kaydedilecek." : "")
+
+                      if (file && file.size > 12 * 1024 * 1024) {
+                        setSelectedFile(null)
+                        setMessage("Dosya çok büyük. Lütfen 12 MB altında JPG, PNG veya PDF yükleyin.")
+                        e.currentTarget.value = ""
+                        return
+                      }
+
+                      setSelectedFile(file)
+                      setMessage(file ? `Dosya seçildi: ${file.name}` : "")
                     }}
-                  style={inputStyle}
-                />
+                    style={inputStyle}
+                  />
               </div>
 
               <button
