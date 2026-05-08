@@ -4,71 +4,72 @@ import { createClient } from "@supabase/supabase-js"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-function cleanFileName(name: string) {
-  return (name || "fis")
-    .toLowerCase()
-    .replace(/\s+/g, "_")
-    .replace(/[^a-z0-9._-]/g, "")
-}
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 export async function POST(request: Request) {
   try {
     console.log("UPLOAD API START")
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-
     if (!supabaseUrl || !serviceRoleKey) {
-      console.error("Supabase environment eksik")
+      console.error("UPLOAD ENV MISSING")
       return NextResponse.json(
-        { error: "Server ortam değişkenleri eksik." },
+        { error: "Supabase server anahtarları eksik." },
         { status: 500 }
       )
     }
 
     const formData = await request.formData()
-    console.log("UPLOAD API FORMDATA OK")
+    console.log("FORMDATA OK")
 
     const file = formData.get("file") as File | null
-    const expenseId = formData.get("expenseId") as string | null
+    const expenseIdRaw = formData.get("expenseId") as string | null
     const userId = formData.get("userId") as string | null
 
-    if (!file || !expenseId || !userId) {
+    if (!file || !expenseIdRaw || !userId) {
+      console.error("UPLOAD MISSING DATA")
       return NextResponse.json(
-        { error: "Eksik veri: file, expenseId veya userId yok." },
+        { error: "Eksik dosya, expenseId veya userId." },
+        { status: 400 }
+      )
+    }
+
+    const expenseId = Number(expenseIdRaw)
+
+    if (!Number.isFinite(expenseId)) {
+      return NextResponse.json(
+        { error: "Geçersiz expenseId." },
         { status: 400 }
       )
     }
 
     if (file.size > 12 * 1024 * 1024) {
       return NextResponse.json(
-        { error: "Dosya çok büyük. Maksimum 12 MB." },
+        { error: "Dosya 12 MB sınırını aşıyor." },
         { status: 400 }
       )
     }
 
-    const allowedTypes = [
+    const allowedTypes = new Set([
       "image/jpeg",
       "image/png",
       "application/pdf",
-    ]
+    ])
 
-    if (file.type && !allowedTypes.includes(file.type)) {
+    if (file.type && !allowedTypes.has(file.type)) {
       return NextResponse.json(
-        { error: `Desteklenmeyen dosya tipi: ${file.type}. JPG, PNG veya PDF yükleyin.` },
+        { error: `Desteklenmeyen dosya tipi: ${file.type}` },
         { status: 400 }
       )
     }
 
-    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    })
+    console.log("FILE OK", file.name, file.type, file.size)
 
-    const originalName = cleanFileName(file.name)
-    const extension = originalName.split(".").pop()?.toLowerCase() || "jpg"
+    const supabase = createClient(supabaseUrl, serviceRoleKey)
+
+    const originalName = file.name || "fis"
+    const extension =
+      originalName.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg"
 
     const safeName = `${Date.now()}_${Math.random()
       .toString(36)
@@ -77,9 +78,9 @@ export async function POST(request: Request) {
     const filePath = `expenses/${expenseId}/${safeName}`
 
     const bytes = await file.arrayBuffer()
-    console.log("UPLOAD API ARRAYBUFFER OK", file.name, file.type, file.size)
+    console.log("ARRAY BUFFER OK", bytes.byteLength)
 
-    const { error: uploadError } = await supabaseAdmin.storage
+    const { error: uploadError } = await supabase.storage
       .from("expense-files")
       .upload(filePath, bytes, {
         contentType: file.type || "application/octet-stream",
@@ -87,38 +88,38 @@ export async function POST(request: Request) {
       })
 
     if (uploadError) {
-      console.error("SUPABASE STORAGE UPLOAD ERROR:", uploadError.message)
+      console.error("STORAGE UPLOAD ERROR", uploadError)
       return NextResponse.json(
         { error: uploadError.message },
         { status: 500 }
       )
     }
 
-    const { data: publicData } = supabaseAdmin.storage
+    console.log("STORAGE UPLOAD OK", filePath)
+
+    const { data: publicData } = supabase.storage
       .from("expense-files")
       .getPublicUrl(filePath)
 
-    const { error: dbError } = await supabaseAdmin
-      .from("expense_files")
-      .insert([
-        {
-          expense_id: Number(expenseId),
-          file_name: file.name || safeName,
-          file_path: filePath,
-          file_url: publicData.publicUrl,
-          uploaded_by: userId,
-        },
-      ])
+    const { error: dbError } = await supabase.from("expense_files").insert([
+      {
+        expense_id: expenseId,
+        file_name: originalName,
+        file_path: filePath,
+        file_url: publicData.publicUrl,
+        uploaded_by: userId,
+      },
+    ])
 
     if (dbError) {
-      console.error("EXPENSE_FILES INSERT ERROR:", dbError.message)
+      console.error("EXPENSE FILE DB ERROR", dbError)
       return NextResponse.json(
         { error: dbError.message },
         { status: 500 }
       )
     }
 
-    console.log("UPLOAD API SUCCESS", filePath)
+    console.log("UPLOAD API SUCCESS", publicData.publicUrl)
 
     return NextResponse.json({
       success: true,
@@ -126,7 +127,7 @@ export async function POST(request: Request) {
       file_url: publicData.publicUrl,
     })
   } catch (err: any) {
-    console.error("UPLOAD API GENERAL ERROR:", err)
+    console.error("UPLOAD API ERROR", err)
 
     return NextResponse.json(
       { error: err?.message || "Server upload hatası." },

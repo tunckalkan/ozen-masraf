@@ -643,49 +643,77 @@ export default function Page() {
   async function uploadExpenseFileViaApi(expenseId: number, file: File): Promise<boolean> {
     if (!user) return false
 
-    const controller = new AbortController()
-    const timer = window.setTimeout(() => controller.abort(), 45000)
-
-    try {
-      const formData = new FormData()
-      formData.append("file", file)
-      formData.append("expenseId", String(expenseId))
-      formData.append("userId", user.id)
-
-      const res = await fetch("/api/upload-expense-file", {
-        method: "POST",
-        body: formData,
-        signal: controller.signal,
-      })
-
-      const text = await res.text()
-      let json: any = {}
-
+    return new Promise((resolve) => {
       try {
-        json = text ? JSON.parse(text) : {}
-      } catch {
-        json = { error: text }
+        setMessage("Dosya sunucuya gönderiliyor...")
+
+        const formData = new FormData()
+        formData.append("file", file)
+        formData.append("expenseId", String(expenseId))
+        formData.append("userId", user.id)
+
+        const xhr = new XMLHttpRequest()
+        xhr.open("POST", "/api/upload-expense-file", true)
+        xhr.timeout = 45000
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100)
+            setMessage(`Dosya yükleniyor... %${percent}`)
+          } else {
+            setMessage("Dosya yükleniyor...")
+          }
+        }
+
+        xhr.onload = async () => {
+          let json: any = {}
+
+          try {
+            json = xhr.responseText ? JSON.parse(xhr.responseText) : {}
+          } catch {
+            json = { error: xhr.responseText }
+          }
+
+          if (xhr.status >= 200 && xhr.status < 300) {
+            setMessage("Masraf ve dosya başarıyla kaydedildi.")
+            resolve(true)
+            return
+          }
+
+          console.error("Upload API hata:", json?.error || xhr.statusText)
+          setMessage(
+            `Masraf kaydedildi ama dosya yüklenemedi: ${
+              json?.error || xhr.statusText || "Sunucu hatası"
+            }`
+          )
+          resolve(false)
+        }
+
+        xhr.onerror = () => {
+          console.error("Upload API bağlantı hatası")
+          setMessage("Masraf kaydedildi ama dosya yüklenemedi: bağlantı hatası.")
+          resolve(false)
+        }
+
+        xhr.ontimeout = () => {
+          console.error("Upload API zaman aşımı")
+          setMessage("Masraf kaydedildi ama dosya yüklenemedi: 45 saniye zaman aşımı.")
+          resolve(false)
+        }
+
+        xhr.onabort = () => {
+          console.error("Upload API iptal edildi")
+          setMessage("Masraf kaydedildi ama dosya yüklenemedi: yükleme iptal edildi.")
+          resolve(false)
+        }
+
+        xhr.send(formData)
+      } catch (err: any) {
+        console.error("Upload API genel hata:", err)
+        setMessage(`Masraf kaydedildi ama dosya yüklenemedi: ${err?.message || "bilinmiyor"}`)
+        resolve(false)
       }
-
-      if (!res.ok) {
-        console.error("Upload API hata:", json?.error || res.statusText)
-        setMessage(`Masraf kaydedildi ama dosya yüklenemedi: ${json?.error || res.statusText}`)
-        return false
-      }
-
-      return true
-    } catch (err: any) {
-      console.error("Upload API bağlantı/zaman aşımı:", err)
-      const msg =
-        err?.name === "AbortError"
-          ? "Dosya yükleme 45 saniyeyi geçti."
-          : err?.message || "Dosya yükleme hatası."
-
-      setMessage(`Masraf kaydedildi ama dosya yüklenemedi: ${msg}`)
-      return false
-    } finally {
-      window.clearTimeout(timer)
-    }
+    })
   }
 
   async function handleSave() {
