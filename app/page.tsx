@@ -220,7 +220,6 @@ export default function Page() {
   const [category, setCategory] = useState("Diğer")
   const [paymentMethod, setPaymentMethod] = useState("personal_card")
   const [last4Digits, setLast4Digits] = useState("")
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
@@ -229,6 +228,7 @@ export default function Page() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState("")
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null)
+  const [fileUploadingId, setFileUploadingId] = useState<number | null>(null)
 
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
@@ -643,76 +643,64 @@ export default function Page() {
   async function uploadExpenseFileViaApi(expenseId: number, file: File): Promise<boolean> {
     if (!user) return false
 
+    if (file.size > 12 * 1024 * 1024) {
+      setMessage("Dosya çok büyük. Lütfen 12 MB altında JPG, PNG veya PDF yükleyin.")
+      return false
+    }
+
+    const allowedTypes = new Set(["image/jpeg", "image/png", "application/pdf"])
+    if (file.type && !allowedTypes.has(file.type)) {
+      setMessage(`Desteklenmeyen dosya tipi: ${file.type}. Sadece JPG, PNG veya PDF yükleyin.`)
+      return false
+    }
+
+    setFileUploadingId(expenseId)
+    setMessage("Dosya yükleniyor...")
+
     return new Promise((resolve) => {
-      try {
-        setMessage("Dosya sunucuya gönderiliyor...")
+      const formData = new FormData()
+      formData.append("file", file)
+      formData.append("expenseId", String(expenseId))
+      formData.append("userId", user.id)
 
-        const formData = new FormData()
-        formData.append("file", file)
-        formData.append("expenseId", String(expenseId))
-        formData.append("userId", user.id)
+      const xhr = new XMLHttpRequest()
+      xhr.open("POST", "/api/upload-expense-file")
+      xhr.timeout = 60000
 
-        const xhr = new XMLHttpRequest()
-        xhr.open("POST", "/api/upload-expense-file", true)
-        xhr.timeout = 45000
-
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable) {
-            const percent = Math.round((event.loaded / event.total) * 100)
-            setMessage(`Dosya yükleniyor... %${percent}`)
-          } else {
-            setMessage("Dosya yükleniyor...")
-          }
-        }
-
-        xhr.onload = async () => {
-          let json: any = {}
-
-          try {
-            json = xhr.responseText ? JSON.parse(xhr.responseText) : {}
-          } catch {
-            json = { error: xhr.responseText }
-          }
+      xhr.onload = async () => {
+        try {
+          const json = xhr.responseText ? JSON.parse(xhr.responseText) : {}
 
           if (xhr.status >= 200 && xhr.status < 300) {
-            setMessage("Masraf ve dosya başarıyla kaydedildi.")
+            setMessage("Dosya başarıyla yüklendi.")
+            await loadExpenses(user.id, profile)
             resolve(true)
-            return
+          } else {
+            const errorText = json?.error || `HTTP ${xhr.status}`
+            setMessage(`Dosya yüklenemedi: ${errorText}`)
+            resolve(false)
           }
-
-          console.error("Upload API hata:", json?.error || xhr.statusText)
-          setMessage(
-            `Masraf kaydedildi ama dosya yüklenemedi: ${
-              json?.error || xhr.statusText || "Sunucu hatası"
-            }`
-          )
+        } catch (err: any) {
+          setMessage(`Dosya yükleme cevabı okunamadı: ${err?.message || "bilinmiyor"}`)
           resolve(false)
+        } finally {
+          setFileUploadingId(null)
         }
+      }
 
-        xhr.onerror = () => {
-          console.error("Upload API bağlantı hatası")
-          setMessage("Masraf kaydedildi ama dosya yüklenemedi: bağlantı hatası.")
-          resolve(false)
-        }
-
-        xhr.ontimeout = () => {
-          console.error("Upload API zaman aşımı")
-          setMessage("Masraf kaydedildi ama dosya yüklenemedi: 45 saniye zaman aşımı.")
-          resolve(false)
-        }
-
-        xhr.onabort = () => {
-          console.error("Upload API iptal edildi")
-          setMessage("Masraf kaydedildi ama dosya yüklenemedi: yükleme iptal edildi.")
-          resolve(false)
-        }
-
-        xhr.send(formData)
-      } catch (err: any) {
-        console.error("Upload API genel hata:", err)
-        setMessage(`Masraf kaydedildi ama dosya yüklenemedi: ${err?.message || "bilinmiyor"}`)
+      xhr.onerror = () => {
+        setMessage("Dosya yüklenemedi: bağlantı hatası.")
+        setFileUploadingId(null)
         resolve(false)
       }
+
+      xhr.ontimeout = () => {
+        setMessage("Dosya yüklenemedi: 60 saniye zaman aşımı.")
+        setFileUploadingId(null)
+        resolve(false)
+      }
+
+      xhr.send(formData)
     })
   }
 
@@ -735,10 +723,6 @@ export default function Page() {
       return
     }
 
-    if (selectedFile && selectedFile.size > 12 * 1024 * 1024) {
-      setMessage("Dosya çok büyük. Lütfen 12 MB altında JPG, PNG veya PDF yükleyin.")
-      return
-    }
 
     setLoading(true)
 
@@ -777,12 +761,6 @@ export default function Page() {
         return
       }
 
-      let fileUploaded = false
-      if (selectedFile) {
-        setMessage("Masraf kaydedildi, dosya yükleniyor...")
-        fileUploaded = await uploadExpenseFileViaApi(inserted.id, selectedFile)
-      }
-
       setExpenseDate("")
       setVendorName("")
       setDescription("")
@@ -791,17 +769,8 @@ export default function Page() {
       setCategory(categories.length > 0 ? categories[0].name : "Diğer")
       setPaymentMethod("personal_card")
       setLast4Digits("")
-      setSelectedFile(null)
 
-      if (selectedFile) {
-        setMessage(
-          fileUploaded
-            ? "Masraf ve dosya başarıyla kaydedildi."
-            : "Masraf kaydedildi ama dosya yüklenemedi."
-        )
-      } else {
-        setMessage(autoApproved ? "Masraf onaylı olarak kaydedildi." : "Masraf kaydedildi.")
-      }
+      setMessage(autoApproved ? "Masraf onaylı olarak kaydedildi. Şimdi listeden fiş yükleyebilirsiniz." : "Masraf kaydedildi. Şimdi listeden fiş yükleyebilirsiniz.")
 
       await loadExpenses(user.id, profile)
     } catch (err: any) {
@@ -1291,28 +1260,8 @@ export default function Page() {
                 </select>
               </div>
 
-              <div style={fieldWrapStyle}>
-                <label style={labelStyle}>Fiş / Fatura</label>
-                
-                  <input
-                    id="expense-file"
-                    type="file"
-                    accept="image/jpeg,image/png,application/pdf"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0] || null
-
-                      if (file && file.size > 12 * 1024 * 1024) {
-                        setSelectedFile(null)
-                        setMessage("Dosya çok büyük. Lütfen 12 MB altında JPG, PNG veya PDF yükleyin.")
-                        e.currentTarget.value = ""
-                        return
-                      }
-
-                      setSelectedFile(file)
-                      setMessage(file ? `Dosya seçildi: ${file.name}` : "")
-                    }}
-                    style={inputStyle}
-                  />
+              <div style={messageStyle}>
+                Önce masrafı kaydedin. Fiş / fatura yükleme işlemini aşağıdaki masraf kaydının içinden ayrıca yapın.
               </div>
 
               <button
@@ -1393,7 +1342,7 @@ export default function Page() {
 
                     <div style={expenseMetaStyle}>Durum: {statusName(item.status)}</div>
 
-                    {item.file_url && (
+                    {item.file_url ? (
                       <div style={expenseMetaStyle}>
                         <a
                           href={item.file_url}
@@ -1403,6 +1352,25 @@ export default function Page() {
                         >
                           Ek Dosya: {item.file_name || "Görüntüle"}
                         </a>
+                      </div>
+                    ) : (
+                      <div style={{ ...fieldWrapStyle, marginTop: "10px" }}>
+                        <label style={labelStyle}>Fiş / Fatura Yükle</label>
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,application/pdf"
+                          disabled={fileUploadingId === item.id}
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0] || null
+                            if (!file) return
+                            await uploadExpenseFileViaApi(item.id, file)
+                            e.currentTarget.value = ""
+                          }}
+                          style={inputStyle}
+                        />
+                        {fileUploadingId === item.id && (
+                          <div style={expenseMetaStyle}>Dosya yükleniyor...</div>
+                        )}
                       </div>
                     )}
 
