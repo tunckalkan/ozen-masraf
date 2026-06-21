@@ -625,10 +625,11 @@ export default function Page() {
       setLoading(false)
       setActionLoadingId(null)
 
-      await supabase.auth.signOut()
+      await withTimeout(supabase.auth.signOut(), 4000)
       clearSupabaseStorage()
     } catch (err) {
       console.error("Çıkış temizleme hatası:", err)
+      clearSupabaseStorage()
     }
 
     window.location.href = "/?logout=1"
@@ -651,9 +652,11 @@ export default function Page() {
     setFileUploadingId(expenseId)
     setMessage("Dosya yükleniyor...")
 
+    const compressedFile = await compressImage(file)
+
     return new Promise((resolve) => {
       const formData = new FormData()
-      formData.append("file", file)
+      formData.append("file", compressedFile)
       formData.append("expenseId", String(expenseId))
       formData.append("userId", user.id)
 
