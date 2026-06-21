@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import { useEffect, useMemo, useState } from "react"
 import Image from "next/image"
@@ -102,12 +102,10 @@ async function compressImage(file: File): Promise<File> {
 
     reader.onload = (e) => {
       const result = e.target?.result
-
       if (typeof result !== "string") {
         finish(file)
         return
       }
-
       img.src = result
     }
 
@@ -125,7 +123,6 @@ async function compressImage(file: File): Promise<File> {
         }
 
         const ratio = Math.min(maxWidth / width, maxHeight / height, 1)
-
         width = Math.max(1, Math.round(width * ratio))
         height = Math.max(1, Math.round(height * ratio))
 
@@ -149,11 +146,9 @@ async function compressImage(file: File): Promise<File> {
               finish(file)
               return
             }
-
             const jpgFile = new File([blob], `fis_${Date.now()}.jpg`, {
               type: "image/jpeg",
             })
-
             finish(jpgFile)
           },
           "image/jpeg",
@@ -167,7 +162,6 @@ async function compressImage(file: File): Promise<File> {
 
     img.onerror = () => finish(file)
     reader.onerror = () => finish(file)
-
     reader.readAsDataURL(file)
   })
 }
@@ -226,6 +220,7 @@ export default function Page() {
 
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(false)
+  const [uploadingFile, setUploadingFile] = useState(false)
   const [message, setMessage] = useState("")
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null)
   const [fileUploadingId, setFileUploadingId] = useState<number | null>(null)
@@ -256,8 +251,12 @@ export default function Page() {
 
   useEffect(() => {
     let mounted = true
+    let initialized = false
 
     async function init() {
+      if (initialized) return
+      initialized = true
+
       try {
         await loadCategories()
 
@@ -293,6 +292,11 @@ export default function Page() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      // İlk yükleme (init) tamamlanmadan auth event'lerini işleme alma.
+      // Bu, Android'de uygulama arka plandan döndüğünde aynı verinin
+      // iki kez sırayla çekilip ekranın "asılı" görünmesini engeller.
+      if (!initialized) return
+
       const currentUser = session?.user ?? null
 
       if (!mounted) return
@@ -616,30 +620,20 @@ export default function Page() {
     }
   }
 
-  function handleLogout() {
-  try {
-    setLoading(false)
-    setActionLoadingId(null)
+  async function handleLogout() {
+    try {
+      setLoading(false)
+      setActionLoadingId(null)
 
-    Object.keys(window.localStorage).forEach((key) => {
-      if (key.includes("supabase") || key.includes("sb-")) {
-        window.localStorage.removeItem(key)
-      }
-    })
+      await supabase.auth.signOut()
+      clearSupabaseStorage()
+    } catch (err) {
+      console.error("Çıkış temizleme hatası:", err)
+    }
 
-    Object.keys(window.sessionStorage).forEach((key) => {
-      if (key.includes("supabase") || key.includes("sb-")) {
-        window.sessionStorage.removeItem(key)
-      }
-    })
-  } catch (err) {
-    console.error("Çıkış temizleme hatası:", err)
+    window.location.href = "/?logout=1"
   }
 
-  window.location.href = "/?logout=1"
-}
-
- 
   async function uploadExpenseFileViaApi(expenseId: number, file: File): Promise<boolean> {
     if (!user) return false
 
@@ -705,7 +699,6 @@ export default function Page() {
   }
 
   async function handleSave() {
-  
     setMessage("")
 
     if (!user || !profile) {
@@ -722,7 +715,6 @@ export default function Page() {
       setMessage("Kartın son 4 hanesini giriniz.")
       return
     }
-
 
     setLoading(true)
 
@@ -770,7 +762,11 @@ export default function Page() {
       setPaymentMethod("personal_card")
       setLast4Digits("")
 
-      setMessage(autoApproved ? "Masraf onaylı olarak kaydedildi. Şimdi listeden fiş yükleyebilirsiniz." : "Masraf kaydedildi. Şimdi listeden fiş yükleyebilirsiniz.")
+      setMessage(
+        autoApproved
+          ? "Masraf onaylı olarak kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
+          : "Masraf kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
+      )
 
       await loadExpenses(user.id, profile)
     } catch (err: any) {
@@ -807,7 +803,6 @@ export default function Page() {
 
       await loadExpenses(user.id, profile)
       setMessage("Masraf onaylandı.")
-      setActionLoadingId(null)  //
     } catch (err: any) {
       setMessage(`Onay sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
@@ -839,7 +834,6 @@ export default function Page() {
 
       await loadExpenses(user.id, profile)
       setMessage("Masraf reddedildi.")
-      setActionLoadingId(null)
     } catch (err: any) {
       setMessage(`Red sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
@@ -1077,7 +1071,10 @@ export default function Page() {
     return (
       <div style={pageStyle}>
         <Header />
-        <div style={centerBoxStyle}>Yükleniyor...</div>
+        <div style={centerBoxStyle}>
+          <div style={spinnerStyle} />
+          <div style={{ marginTop: "14px" }}>Yükleniyor...</div>
+        </div>
       </div>
     )
   }
@@ -1133,15 +1130,7 @@ export default function Page() {
             <div style={roleStyle}>Rol: {roleName(profile.role_id)}</div>
           </div>
 
-         
-          <button
-            type="button"
-            onClick={() => {
-              clearSupabaseStorage()
-              window.location.href = "/?logout=1"
-            }}
-            style={logoutButtonStyle}
-          >
+          <button type="button" onClick={handleLogout} style={logoutButtonStyle}>
             Çıkış Yap
           </button>
         </div>
@@ -1261,7 +1250,8 @@ export default function Page() {
               </div>
 
               <div style={messageStyle}>
-                Önce masrafı kaydedin. Fiş / fatura yükleme işlemini aşağıdaki masraf kaydının içinden ayrıca yapın.
+                Önce masrafı kaydedin. Fiş / fatura yükleme işlemini aşağıdaki masraf kaydının
+                içinden ayrıca yapın.
               </div>
 
               <button
@@ -1777,6 +1767,40 @@ const centerBoxStyle: React.CSSProperties = {
   padding: "24px",
   textAlign: "center",
   boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+}
+
+const spinnerStyle: React.CSSProperties = {
+  width: "36px",
+  height: "36px",
+  margin: "0 auto",
+  borderRadius: "50%",
+  border: "4px solid #e2e8f0",
+  borderTopColor: "#0f172a",
+  animation: "spin 0.8s linear infinite",
+}
+
+const btnSpinnerStyle: React.CSSProperties = {
+  width: "16px",
+  height: "16px",
+  borderRadius: "50%",
+  border: "2px solid rgba(255,255,255,0.4)",
+  borderTopColor: "#ffffff",
+  animation: "spin 0.8s linear infinite",
+  display: "inline-block",
+}
+
+const btnContentStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "8px",
+}
+
+const uploadHintStyle: React.CSSProperties = {
+  marginTop: "10px",
+  fontSize: "13px",
+  color: "#64748b",
+  textAlign: "center",
 }
 
 const topBarStyle: React.CSSProperties = {
