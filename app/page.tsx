@@ -669,6 +669,7 @@ export default function Page() {
           const json = xhr.responseText ? JSON.parse(xhr.responseText) : {}
 
           if (xhr.status >= 200 && xhr.status < 300) {
+            setFileUploadingId(null)
             setMessage("Dosya başarıyla yüklendi.")
             await loadExpenses(user.id, profile)
             resolve(true)
