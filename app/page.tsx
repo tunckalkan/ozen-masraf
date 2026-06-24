@@ -767,12 +767,31 @@ export default function Page() {
       setLast4Digits("")
 
       setMessage(
-        autoApproved
-          ? "Masraf onaylı olarak kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
-          : "Masraf kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
-      )
+       autoApproved
+         ? "Masraf onaylı olarak kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
+         : "Masraf kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
+)
 
-      await loadExpenses(user.id, profile)
+setExpenses(prev => [{
+  id: inserted.id,
+  user_id: user.id,
+  expense_date: expenseDate,
+  vendor_name: vendorName || null,
+  description,
+  amount: Number(amount),
+  currency_code: currencyCode,
+  category,
+  payment_method: paymentMethod,
+  payment_type: paymentMethod,
+  last4_digits: needsLast4 ? last4Digits : null,
+  status: autoApproved ? "approved" : "submitted",
+  manager_approved_by: autoApproved ? user.id : null,
+  manager_approved_at: autoApproved ? new Date().toISOString() : null,
+  rejected_by: null,
+  rejected_at: null,
+  rejection_note: null,
+  created_at: new Date().toISOString(),
+} as any, ...prev])
     } catch (err: any) {
       setMessage(`Masraf kaydı sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
