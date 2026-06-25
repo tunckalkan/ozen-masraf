@@ -703,6 +703,7 @@ export default function Page() {
   }
 
   async function handleSave() {
+    setLoading(false) // Android reset
     setMessage("")
 
     if (!user || !profile) {
@@ -795,7 +796,7 @@ setExpenses(prev => [{
     } catch (err: any) {
       setMessage(`Masraf kaydı sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
     } finally {
-      setLoading(false)
+      setTimeout(() => setLoading(false), 100)
     }
   }
 
