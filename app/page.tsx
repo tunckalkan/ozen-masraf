@@ -291,11 +291,15 @@ export default function Page() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
       // İlk yükleme (init) tamamlanmadan auth event'lerini işleme alma.
       // Bu, Android'de uygulama arka plandan döndüğünde aynı verinin
       // iki kez sırayla çekilip ekranın "asılı" görünmesini engeller.
       if (!initialized) return
+
+      // Token yenileme event'i gelince hiçbir şey yapma — Android'de
+      // masraf kaydı sırasında token refresh olunca loading state'i bozuyor.
+      if (event === "TOKEN_REFRESHED") return
 
       const currentUser = session?.user ?? null
 
