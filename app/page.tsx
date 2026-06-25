@@ -703,102 +703,104 @@ export default function Page() {
   }
 
   async function handleSave() {
-    setLoading(false) // Android reset
+    if (loading) return  // çift tıklamayı engelle
     setMessage("")
 
-    if (!user || !profile) {
-      setMessage("Önce giriş yapmalısınız.")
-      return
-    }
-
-    if (!expenseDate || !description || !amount) {
-      setMessage("Tarih, açıklama ve tutar zorunlu.")
-      return
-    }
-
-    if (needsLast4 && last4Digits.length !== 4) {
-      setMessage("Kartın son 4 hanesini giriniz.")
-      return
-    }
-
-    setLoading(true)
-
-    try {
-      const autoApproved = isYonetici || isHiddenAdmin
-
-      const insertPayload = {
-        user_id: user.id,
-        expense_date: expenseDate,
-        vendor_name: vendorName || null,
-        description,
-        amount: Number(amount),
-        currency_code: currencyCode,
-        category,
-        payment_method: paymentMethod,
-        payment_type: paymentMethod,
-        last4_digits: needsLast4 ? last4Digits : null,
-        status: autoApproved ? "approved" : "submitted",
-        manager_approved_by: autoApproved ? user.id : null,
-        manager_approved_at: autoApproved ? new Date().toISOString() : null,
-        rejected_by: null,
-        rejected_at: null,
-        rejection_note: null,
-        department_id: profile.department_id || 1,
-        category_id: 1,
-      }
-
-      const { data: inserted, error } = await supabase
-        .from("expenses")
-        .insert([insertPayload as any])
-        .select("id, status, manager_approved_by, manager_approved_at")
-        .single()
-
-      if (error || !inserted) {
-        setMessage(`Masraf kaydedilemedi: ${error?.message || "hata"}`)
-        return
-      }
-
-      setExpenseDate("")
-      setVendorName("")
-      setDescription("")
-      setAmount("")
-      setCurrencyCode("TRY")
-      setCategory(categories.length > 0 ? categories[0].name : "Diğer")
-      setPaymentMethod("personal_card")
-      setLast4Digits("")
-
-      setMessage(
-       autoApproved
-         ? "Masraf onaylı olarak kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
-         : "Masraf kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
-)
-
-setExpenses(prev => [{
-  id: inserted.id,
-  user_id: user.id,
-  expense_date: expenseDate,
-  vendor_name: vendorName || null,
-  description,
-  amount: Number(amount),
-  currency_code: currencyCode,
-  category,
-  payment_method: paymentMethod,
-  payment_type: paymentMethod,
-  last4_digits: needsLast4 ? last4Digits : null,
-  status: autoApproved ? "approved" : "submitted",
-  manager_approved_by: autoApproved ? user.id : null,
-  manager_approved_at: autoApproved ? new Date().toISOString() : null,
-  rejected_by: null,
-  rejected_at: null,
-  rejection_note: null,
-  created_at: new Date().toISOString(),
-} as any, ...prev])
-    } catch (err: any) {
-      setMessage(`Masraf kaydı sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
-    } finally {
-      setTimeout(() => setLoading(false), 100)
-    }
+  if (!user || !profile) {
+    setMessage("Önce giriş yapmalısınız.")
+    return
   }
+
+  if (!expenseDate || !description || !amount) {
+    setMessage("Tarih, açıklama ve tutar zorunlu.")
+    return
+  }
+
+  if (needsLast4 && last4Digits.length !== 4) {
+    setMessage("Kartın son 4 hanesini giriniz.")
+    return
+  }
+
+  setLoading(true)
+
+  try {
+    const autoApproved = isYonetici || isHiddenAdmin
+
+    const insertPayload = {
+      user_id: user.id,
+      expense_date: expenseDate,
+      vendor_name: vendorName || null,
+      description,
+      amount: Number(amount),
+      currency_code: currencyCode,
+      category,
+      payment_method: paymentMethod,
+      payment_type: paymentMethod,
+      last4_digits: needsLast4 ? last4Digits : null,
+      status: autoApproved ? "approved" : "submitted",
+      manager_approved_by: autoApproved ? user.id : null,
+      manager_approved_at: autoApproved ? new Date().toISOString() : null,
+      rejected_by: null,
+      rejected_at: null,
+      rejection_note: null,
+      department_id: profile.department_id || 1,
+      category_id: 1,
+    }
+
+    const { data: inserted, error } = await supabase
+      .from("expenses")
+      .insert([insertPayload as any])
+      .select("id, status, manager_approved_by, manager_approved_at")
+      .single()
+
+    if (error || !inserted) {
+      setMessage(`Masraf kaydedilemedi: ${error?.message || "hata"}`)
+      setLoading(false)
+      return
+    }
+
+    setExpenseDate("")
+    setVendorName("")
+    setDescription("")
+    setAmount("")
+    setCurrencyCode("TRY")
+    setCategory(categories.length > 0 ? categories[0].name : "Diğer")
+    setPaymentMethod("personal_card")
+    setLast4Digits("")
+
+    setMessage(
+      autoApproved
+        ? "Masraf onaylı olarak kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
+        : "Masraf kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
+    )
+
+    setExpenses(prev => [{
+      id: inserted.id,
+      user_id: user.id,
+      expense_date: expenseDate,
+      vendor_name: vendorName || null,
+      description,
+      amount: Number(amount),
+      currency_code: currencyCode,
+      category,
+      payment_method: paymentMethod,
+      last4_digits: needsLast4 ? last4Digits : null,
+      status: autoApproved ? "approved" : "submitted",
+      manager_approved_by: autoApproved ? user.id : null,
+      manager_approved_at: autoApproved ? new Date().toISOString() : null,
+      rejected_by: null,
+      rejected_at: null,
+      rejection_note: null,
+      created_at: new Date().toISOString(),
+    } as any, ...prev])
+
+    setLoading(false)
+
+  } catch (err: any) {
+    setMessage(`Masraf kaydı sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
+    setLoading(false)
+  }
+}
 
   async function handleManagerApprove(expenseId: number) {
     if (!user) return
