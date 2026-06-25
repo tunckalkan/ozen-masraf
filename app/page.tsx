@@ -707,8 +707,8 @@ export default function Page() {
   }
 
   async function handleSave() {
-    if (loading) return  // çift tıklamayı engelle
-    setMessage("")
+    if (loading) return
+    setMessage("Adım 1: Başlıyor...")
 
   if (!user || !profile) {
     setMessage("Önce giriş yapmalısınız.")
@@ -726,9 +726,11 @@ export default function Page() {
   }
 
   setLoading(true)
+  setMessage("Adım 2: Loading true oldu...")
 
   try {
     const autoApproved = isYonetici || isHiddenAdmin
+    setMessage("Adım 3: Insert başlıyor...")
 
     const insertPayload = {
       user_id: user.id,
@@ -757,12 +759,15 @@ export default function Page() {
       .select("id, status, manager_approved_by, manager_approved_at")
       .single()
 
+    setMessage("Adım 4: Insert bitti, kontrol ediliyor...")
+
     if (error || !inserted) {
       setMessage(`Masraf kaydedilemedi: ${error?.message || "hata"}`)
       setLoading(false)
       return
     }
 
+    setMessage("Adım 5: Form temizleniyor...")
     setExpenseDate("")
     setVendorName("")
     setDescription("")
@@ -772,12 +777,7 @@ export default function Page() {
     setPaymentMethod("personal_card")
     setLast4Digits("")
 
-    setMessage(
-      autoApproved
-        ? "Masraf onaylı olarak kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
-        : "Masraf kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
-    )
-
+    setMessage("Adım 6: Expenses güncelleniyor...")
     setExpenses(prev => [{
       id: inserted.id,
       user_id: user.id,
@@ -798,10 +798,16 @@ export default function Page() {
       created_at: new Date().toISOString(),
     } as any, ...prev])
 
+    setMessage("Adım 7: Loading false yapılıyor...")
     setLoading(false)
+    setMessage(
+      autoApproved
+        ? "Masraf onaylı olarak kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
+        : "Masraf kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
+    )
 
   } catch (err: any) {
-    setMessage(`Masraf kaydı sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
+    setMessage(`HATA: ${err?.message || "bilinmiyor"}`)
     setLoading(false)
   }
 }
