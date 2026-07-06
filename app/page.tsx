@@ -708,7 +708,6 @@ export default function Page() {
 
   async function handleSave() {
     if (loading) return
-    setMessage("")
 
     if (!user || !profile) {
       setMessage("Önce giriş yapmalısınız.")
@@ -726,28 +725,41 @@ export default function Page() {
     }
 
     setLoading(true)
+    setMessage("")
+
+    // Formu kaydetmeden önce değerleri yakala
+    const savedDate = expenseDate
+    const savedVendor = vendorName
+    const savedDesc = description
+    const savedAmt = amount
+    const savedCurrency = currencyCode
+    const savedCategory = category
+    const savedPayment = paymentMethod
+    const savedLast4 = last4Digits
+    const savedUserId = user.id
+    const savedProfile = { ...profile }
 
     try {
       const autoApproved = isYonetici || isHiddenAdmin
 
       const insertPayload = {
-        user_id: user.id,
-        expense_date: expenseDate,
-        vendor_name: vendorName || null,
-        description,
-        amount: Number(amount),
-        currency_code: currencyCode,
-        category,
-        payment_method: paymentMethod,
-        payment_type: paymentMethod,
-        last4_digits: needsLast4 ? last4Digits : null,
+        user_id: savedUserId,
+        expense_date: savedDate,
+        vendor_name: savedVendor || null,
+        description: savedDesc,
+        amount: Number(savedAmt),
+        currency_code: savedCurrency,
+        category: savedCategory,
+        payment_method: savedPayment,
+        payment_type: savedPayment,
+        last4_digits: needsLast4 ? savedLast4 : null,
         status: autoApproved ? "approved" : "submitted",
-        manager_approved_by: autoApproved ? user.id : null,
+        manager_approved_by: autoApproved ? savedUserId : null,
         manager_approved_at: autoApproved ? new Date().toISOString() : null,
         rejected_by: null,
         rejected_at: null,
         rejection_note: null,
-        department_id: profile.department_id || 1,
+        department_id: savedProfile.department_id || 1,
         category_id: 1,
       }
 
@@ -760,20 +772,11 @@ export default function Page() {
       const { data: inserted, error } = await withTimeout(insertPromise, 15000)
 
       if (error || !inserted) {
-        setMessage(`Masraf kaydedilemedi: ${error?.message || "hata"}`)
+        setMessage(`⚠️ Masraf kaydedilemedi: ${error?.message || "bilinmeyen hata"}`)
         return
       }
 
       // Formu temizle
-      const savedExpenseDate = expenseDate
-      const savedVendorName = vendorName
-      const savedDescription = description
-      const savedAmount = amount
-      const savedCurrencyCode = currencyCode
-      const savedCategory = category
-      const savedPaymentMethod = paymentMethod
-      const savedLast4Digits = last4Digits
-
       setExpenseDate("")
       setVendorName("")
       setDescription("")
@@ -783,28 +786,28 @@ export default function Page() {
       setPaymentMethod("personal_card")
       setLast4Digits("")
 
-      // Listeyi optimistik güncelle (arka planda gerçek veriyi çek)
+      // Optimistik güncelleme: yeni kaydı listeye ekle
       setExpenses(prev => [{
         id: inserted.id,
-        user_id: user.id,
-        expense_date: savedExpenseDate,
-        vendor_name: savedVendorName || null,
-        description: savedDescription,
-        amount: Number(savedAmount),
-        currency_code: savedCurrencyCode,
+        user_id: savedUserId,
+        expense_date: savedDate,
+        vendor_name: savedVendor || null,
+        description: savedDesc,
+        amount: Number(savedAmt),
+        currency_code: savedCurrency,
         category: savedCategory,
-        payment_method: savedPaymentMethod,
-        last4_digits: needsLast4 ? savedLast4Digits : null,
+        payment_method: savedPayment,
+        last4_digits: needsLast4 ? savedLast4 : null,
         status: autoApproved ? "approved" : "submitted",
-        manager_approved_by: autoApproved ? user.id : null,
+        manager_approved_by: autoApproved ? savedUserId : null,
         manager_approved_at: autoApproved ? new Date().toISOString() : null,
         rejected_by: null,
         rejected_at: null,
         rejection_note: null,
         created_at: new Date().toISOString(),
-        full_name: profile.full_name,
+        full_name: savedProfile.full_name,
         manager_name: null,
-        manager_id: profile.manager_id || null,
+        manager_id: savedProfile.manager_id || null,
         department_name: null,
         file_url: null,
         file_name: null,
@@ -812,15 +815,19 @@ export default function Page() {
 
       setMessage(
         autoApproved
-          ? "Masraf onaylı olarak kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
-          : "Masraf kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
+          ? "✅ Masraf onaylı olarak kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
+          : "✅ Masraf kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
       )
 
-      // Arka planda gerçek listeyi yenile (loading'i bekletmeden)
-      loadExpenses(user.id, profile).catch(console.error)
+      // 2 saniye sonra listeyi arka planda yenile
+      // (insert'in DB'de görünür olması için bekle)
+      window.setTimeout(() => {
+        loadExpenses(savedUserId, savedProfile as Profile).catch(console.error)
+      }, 2000)
 
     } catch (err: any) {
-      setMessage(`Masraf kaydı sırasında hata oluştu: ${err?.message || "bilinmiyor"}`)
+      const errMsg = err?.message || "bilinmiyor"
+      setMessage(`⚠️ Masraf kaydı sırasında hata: ${errMsg}`)
     } finally {
       setLoading(false)
     }
