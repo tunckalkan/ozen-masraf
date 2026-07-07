@@ -84,86 +84,88 @@ function isImageFile(file: File): boolean {
 async function compressImage(file: File): Promise<File> {
   if (!isImageFile(file)) return file
 
-  return new Promise((resolve) => {
-    const reader = new FileReader()
-    const img = new window.Image()
-    let finished = false
+  // createImageBitmap: Android Chrome'da FileReader+Image'den çok daha güvenilir
+  try {
+    const bitmap = await createImageBitmap(file)
+    const maxWidth = 1200
+    const maxHeight = 1200
+    const ratio = Math.min(maxWidth / bitmap.width, maxHeight / bitmap.height, 1)
+    const width = Math.max(1, Math.round(bitmap.width * ratio))
+    const height = Math.max(1, Math.round(bitmap.height * ratio))
 
-    function finish(result: File) {
-      if (finished) return
-      finished = true
-      clearTimeout(timer)
-      resolve(result)
-    }
+    const canvas = document.createElement("canvas")
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext("2d")
+    if (!ctx) { bitmap.close(); return file }
 
-    const timer = window.setTimeout(() => {
-      finish(file)
-    }, 10000)
+    ctx.fillStyle = "#ffffff"
+    ctx.fillRect(0, 0, width, height)
+    ctx.drawImage(bitmap, 0, 0, width, height)
+    bitmap.close()
 
-    reader.onload = (e) => {
-      const result = e.target?.result
-      if (typeof result !== "string") {
-        finish(file)
-        return
+    const blob: Blob | null = await new Promise((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", 0.72)
+    })
+    if (!blob) return file
+
+    return new File([blob], `fis_${Date.now()}.jpg`, { type: "image/jpeg" })
+  } catch {
+    // Fallback: FileReader + Image
+    return new Promise((resolve) => {
+      const reader = new FileReader()
+      const img = new window.Image()
+      let finished = false
+
+      function finish(result: File) {
+        if (finished) return
+        finished = true
+        clearTimeout(timer)
+        resolve(result)
       }
-      img.src = result
-    }
 
-    img.onload = () => {
-      try {
-        const maxWidth = 1200
-        const maxHeight = 1200
+      const timer = window.setTimeout(() => finish(file), 10000)
 
-        let width = img.width
-        let height = img.height
-
-        if (!width || !height) {
-          finish(file)
-          return
-        }
-
-        const ratio = Math.min(maxWidth / width, maxHeight / height, 1)
-        width = Math.max(1, Math.round(width * ratio))
-        height = Math.max(1, Math.round(height * ratio))
-
-        const canvas = document.createElement("canvas")
-        canvas.width = width
-        canvas.height = height
-
-        const ctx = canvas.getContext("2d", { alpha: false })
-        if (!ctx) {
-          finish(file)
-          return
-        }
-
-        ctx.fillStyle = "#ffffff"
-        ctx.fillRect(0, 0, width, height)
-        ctx.drawImage(img, 0, 0, width, height)
-
-        canvas.toBlob(
-          (blob) => {
-            if (!blob) {
-              finish(file)
-              return
-            }
-            const jpgFile = new File([blob], `fis_${Date.now()}.jpg`, {
-              type: "image/jpeg",
-            })
-            finish(jpgFile)
-          },
-          "image/jpeg",
-          0.72
-        )
-      } catch (err) {
-        console.error("Resim küçültme hatası:", err)
-        finish(file)
+      reader.onload = (e) => {
+        const result = e.target?.result
+        if (typeof result !== "string") { finish(file); return }
+        img.src = result
       }
-    }
 
-    img.onerror = () => finish(file)
-    reader.onerror = () => finish(file)
-    reader.readAsDataURL(file)
-  })
+      img.onload = () => {
+        try {
+          const maxWidth = 1200
+          const maxHeight = 1200
+          let width = img.width
+          let height = img.height
+          if (!width || !height) { finish(file); return }
+          const ratio = Math.min(maxWidth / width, maxHeight / height, 1)
+          width = Math.max(1, Math.round(width * ratio))
+          height = Math.max(1, Math.round(height * ratio))
+          const canvas = document.createElement("canvas")
+          canvas.width = width
+          canvas.height = height
+          const ctx = canvas.getContext("2d", { alpha: false })
+          if (!ctx) { finish(file); return }
+          ctx.fillStyle = "#ffffff"
+          ctx.fillRect(0, 0, width, height)
+          ctx.drawImage(img, 0, 0, width, height)
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) { finish(file); return }
+              finish(new File([blob], `fis_${Date.now()}.jpg`, { type: "image/jpeg" }))
+            },
+            "image/jpeg",
+            0.72
+          )
+        } catch { finish(file) }
+      }
+
+      img.onerror = () => finish(file)
+      reader.onerror = () => finish(file)
+      reader.readAsDataURL(file)
+    })
+  }
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -666,7 +668,7 @@ export default function Page() {
 
       const xhr = new XMLHttpRequest()
       xhr.open("POST", "/api/upload-expense-file")
-      xhr.timeout = 60000
+      xhr.timeout = 120000
 
       xhr.onload = async () => {
         try {
@@ -727,7 +729,6 @@ export default function Page() {
     setLoading(true)
     setMessage("")
 
-    // Değerleri işlem başında kilitle — async sırasında state değişmesinden etkilenmesin
     const savedDate = expenseDate
     const savedVendor = vendorName
     const savedDesc = description
@@ -739,10 +740,10 @@ export default function Page() {
     const savedUserId = user.id
     const savedProfile = { ...profile }
 
-    // 25 saniye içinde bitmezse butonu serbest bırak (Supabase'i öldürmeden)
+    // 25 saniye geçerse butonu serbest bırak
     const safetyTimer = window.setTimeout(() => {
       setLoading(false)
-      setMessage("⚠️ Bağlantı çok yavaş. Masraf kaydedilmiş olabilir, listeyi yenileyin.")
+      setMessage("⚠️ Bağlantı yavaş. Masraf kaydedilmiş olabilir, listeyi kontrol edin.")
     }, 25000)
 
     try {
@@ -769,7 +770,6 @@ export default function Page() {
         category_id: 1,
       }
 
-      // Timeout yok — Supabase kendi bağlantısını yönetsin
       const { data: inserted, error } = await supabase
         .from("expenses")
         .insert([insertPayload as any])
@@ -781,7 +781,6 @@ export default function Page() {
         return
       }
 
-      // Formu temizle
       setExpenseDate("")
       setVendorName("")
       setDescription("")
@@ -791,7 +790,6 @@ export default function Page() {
       setPaymentMethod("personal_card")
       setLast4Digits("")
 
-      // Optimistik güncelleme
       setExpenses(prev => [{
         id: inserted.id,
         user_id: savedUserId,
@@ -824,7 +822,6 @@ export default function Page() {
           : "✅ Masraf kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
       )
 
-      // 2 sn sonra listeyi yenile (insert'in DB'de görünür olması için bekle)
       window.setTimeout(() => {
         loadExpenses(savedUserId, savedProfile as Profile).catch(console.error)
       }, 2000)
