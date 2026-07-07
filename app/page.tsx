@@ -256,9 +256,6 @@ export default function Page() {
     let initialized = false
 
     async function init() {
-      if (initialized) return
-      initialized = true
-
       try {
         await loadCategories()
 
@@ -286,6 +283,7 @@ export default function Page() {
         console.error("Init error:", err)
       } finally {
         if (mounted) setBooting(false)
+        initialized = true  // init bittikten SONRA true yap
       }
     }
 
@@ -293,44 +291,22 @@ export default function Page() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // İlk yükleme (init) tamamlanmadan auth event'lerini işleme alma.
-      // Bu, Android'de uygulama arka plandan döndüğünde aynı verinin
-      // iki kez sırayla çekilip ekranın "asılı" görünmesini engeller.
+    } = supabase.auth.onAuthStateChange(async (event, _session) => {
+      // Init tamamlanmadan hiçbir event işlenmesin
       if (!initialized) return
-
-      // Token yenileme event'i gelince hiçbir şey yapma — Android'de
-      // masraf kaydı sırasında token refresh olunca loading state'i bozuyor.
-      if (event === "TOKEN_REFRESHED") return
-
-      const currentUser = session?.user ?? null
-
       if (!mounted) return
 
-      await loadCategories()
-
-      if (currentUser) {
-        setUser(currentUser)
-
-        const loadedProfile = await loadProfile(currentUser.id)
-        if (!mounted) return
-
-        if (loadedProfile) {
-          await loadExpenses(currentUser.id, loadedProfile)
-
-          if (loadedProfile.role_id === 2 || loadedProfile.role_id === 4) {
-            await loadManagedUsers()
-          }
-        }
-      } else {
+      // Sadece oturum kapanmasını dinle.
+      // SIGNED_IN, TOKEN_REFRESHED vb. eventlerde loadExpenses çalıştırmak
+      // 2. masraf kaydı sırasında Supabase bağlantısını bloke ediyor.
+      // init() ve handleLogin zaten tüm veri yüklemesini yapıyor.
+      if (event === "SIGNED_OUT") {
         setUser(null)
         setProfile(null)
         setExpenses([])
         setManagedUsers([])
         setDepartments([])
       }
-
-      if (mounted) setBooting(false)
     })
 
     return () => {
