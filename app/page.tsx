@@ -822,9 +822,8 @@ export default function Page() {
           : "✅ Masraf kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
       )
 
-      window.setTimeout(() => {
-        loadExpenses(savedUserId, savedProfile as Profile).catch(console.error)
-      }, 2000)
+      // Arka plan loadExpenses kaldırıldı — 2. kayıtta Supabase bağlantısını bloke ediyordu.
+      // Optimistik güncelleme yeterli; liste sayfa yenilenince güncellenir.
 
     } catch (err: any) {
       setMessage(`⚠️ Masraf kaydı hatası: ${err?.message || "bilinmiyor"}`)
