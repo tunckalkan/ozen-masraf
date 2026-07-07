@@ -727,7 +727,7 @@ export default function Page() {
     setLoading(true)
     setMessage("")
 
-    // Formu kaydetmeden önce değerleri yakala
+    // Değerleri işlem başında kilitle — async sırasında state değişmesinden etkilenmesin
     const savedDate = expenseDate
     const savedVendor = vendorName
     const savedDesc = description
@@ -738,6 +738,12 @@ export default function Page() {
     const savedLast4 = last4Digits
     const savedUserId = user.id
     const savedProfile = { ...profile }
+
+    // 25 saniye içinde bitmezse butonu serbest bırak (Supabase'i öldürmeden)
+    const safetyTimer = window.setTimeout(() => {
+      setLoading(false)
+      setMessage("⚠️ Bağlantı çok yavaş. Masraf kaydedilmiş olabilir, listeyi yenileyin.")
+    }, 25000)
 
     try {
       const autoApproved = isYonetici || isHiddenAdmin
@@ -763,13 +769,12 @@ export default function Page() {
         category_id: 1,
       }
 
-      const insertPromise = supabase
+      // Timeout yok — Supabase kendi bağlantısını yönetsin
+      const { data: inserted, error } = await supabase
         .from("expenses")
         .insert([insertPayload as any])
         .select("id, status, manager_approved_by, manager_approved_at")
         .single()
-
-      const { data: inserted, error } = await withTimeout(insertPromise, 15000)
 
       if (error || !inserted) {
         setMessage(`⚠️ Masraf kaydedilemedi: ${error?.message || "bilinmeyen hata"}`)
@@ -786,7 +791,7 @@ export default function Page() {
       setPaymentMethod("personal_card")
       setLast4Digits("")
 
-      // Optimistik güncelleme: yeni kaydı listeye ekle
+      // Optimistik güncelleme
       setExpenses(prev => [{
         id: inserted.id,
         user_id: savedUserId,
@@ -819,16 +824,15 @@ export default function Page() {
           : "✅ Masraf kaydedildi. Şimdi listeden fiş yükleyebilirsiniz."
       )
 
-      // 2 saniye sonra listeyi arka planda yenile
-      // (insert'in DB'de görünür olması için bekle)
+      // 2 sn sonra listeyi yenile (insert'in DB'de görünür olması için bekle)
       window.setTimeout(() => {
         loadExpenses(savedUserId, savedProfile as Profile).catch(console.error)
       }, 2000)
 
     } catch (err: any) {
-      const errMsg = err?.message || "bilinmiyor"
-      setMessage(`⚠️ Masraf kaydı sırasında hata: ${errMsg}`)
+      setMessage(`⚠️ Masraf kaydı hatası: ${err?.message || "bilinmiyor"}`)
     } finally {
+      clearTimeout(safetyTimer)
       setLoading(false)
     }
   }
