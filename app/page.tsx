@@ -370,7 +370,7 @@ export default function Page() {
     if (activeProfile.role_id === 1) {
       expenseQuery = expenseQuery.eq("user_id", userId)
     } else if (activeProfile.role_id === 2) {
-      expenseQuery = expenseQuery.eq("status", "approved")
+      // Muhasebe tüm masrafları görür (onaylı + bekleyen + reddedilen)
     } else if (activeProfile.role_id === 3) {
       // Yönetici tüm masrafları görebilir.
       // Onay butonu sadece kendine bağlı personelde gösterilecek.
